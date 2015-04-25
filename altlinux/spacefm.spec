@@ -60,7 +60,7 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 %makeinstall_std
 %find_lang %name
 
-%files lang -f %name.lang
+%files -f %name.lang
 %dir %_datadir/%name
 %dir %_datadir/%name/ui
 %dir %_datadir/doc/%name
@@ -74,6 +74,9 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 %_bindir/spacefm-auth
 
 %changelog
+* Sat Apr 25 2015 Dmitriy Khanzhin <jinn@altlinux.org> 1.0.0-alt0.git869ce6c
+- initial build for AltLinux
+
 * Tue Mar 19 2013 mournblade@gmx.us
 - 0.8.7 Upstream Release
 * Tue Mar 12 2013 mournblade@gmx.us
