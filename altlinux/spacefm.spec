@@ -64,14 +64,12 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 %dir %_datadir/%name
 %dir %_datadir/%name/ui
 %dir %_datadir/doc/%name
-%_bindir/%name
-%_bindir/spacefm-auth
+%_bindir/*
 %_datadir/%name/ui/*.ui
 %_datadir/doc/%name/spacefm-manual-en.html
 %_datadir/applications/*.desktop
-%_datadir/pixmaps
+%_datadir/pixmaps/*
 %_datadir/mime/packages/spacefm-mime.xml
-%_bindir/spacefm-auth
 
 %changelog
 * Sat Apr 25 2015 Dmitriy Khanzhin <jinn@altlinux.org> 1.0.0-alt0.git869ce6c
