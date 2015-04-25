@@ -12,33 +12,16 @@ Group: File tools
 Url: https://github.com/IgnorantGuru/spacefm
 Source0: %name-%version.tar
 
-BuildRequires: autoconf
-BuildRequires: libtool
-BuildRequires: intltool
-BuildRequires: pkgconfig
-BuildRequires: libgtk+2-devel
-BuildRequires: desktop-file-utils
-BuildRequires: fdupes
-BuildRequires: pkgconfig(libstartup-notification-1.0)
-BuildRequires: xz
-BuildRequires: libffmpegthumbnailer-devel
-
-BuildRequires:  pkgconfig(gobject-2.0)
-BuildRequires:  pkgconfig(gthread-2.0)
-BuildRequires:  pkgconfig(libudev) >= 143
-Requires:       desktop-file-utils
-Requires:       shared-mime-info
+# Automatically added by buildreq on Sat Apr 25 2015
+BuildRequires: intltool libffmpegthumbnailer-devel libgtk+2-devel libstartup-notification-devel libudev-devel
+Requires: desktop-file-utils
+Requires: shared-mime-info
 # Mount without root requirement.
-Requires:     udisks2
+Requires: udisks2
 # Plugin download.
-Requires:     wget
+Requires: wget
 # Execution of SpaceFM and applications from root.
-Requires:     xdg-utils
-#if #{with gtk2}
-BuildRequires:  pkgconfig(gtk+-2.0) >= 2.18.0
-#else
-#BuildRequires:  pkgconfig(gtk+-3.0) >= 3.0.0
-#endif
+Requires: xdg-utils
 
 %description
 A fast and lightweight, but extremly powerful, multi-paned, tabbed file manager originally forked from the 0.5 series pcmanfm as pcmanfm-mod.
