@@ -31,6 +31,7 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 %build
 %autoreconf
 %configure --with-gtk2 \
+           --enable-pixmaps \
            --with-preferable-sudo=%_bindir/gksu
 
 %make
