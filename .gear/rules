@@ -1,3 +1,3 @@
 copy: altlinux/*
 spec: altlinux/spacefm.spec
-tar: upstream:. name=@name@-@version@
+tar.xz: upstream:. name=@name@-@version@

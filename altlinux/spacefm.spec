@@ -1,27 +1,23 @@
 #
 # spec file for package spacemanfm
 #
-%define gitrev .git869ce6c
+
 Name: spacefm
+Version: 1.0.0
+Release: alt0.M70T.1
+
 Summary: A fast, lightweight, feature-rich, multi-panel, tabbed file manager
 Summary(ru_RU.UTF-8): Легкий и быстрый файл-менеджер (форк pcmanfm 0.5)
-Version: 1.0.0
-Release: alt0%gitrev
 License: GPL-3.0+
 Group: File tools
 Url: https://github.com/IgnorantGuru/spacefm
-Source0: %name-%version.tar
+
+Source0: %name-%version.tar.xz
+
+Requires: desktop-file-utils gksu shared-mime-info wget xterm
 
 # Automatically added by buildreq on Sat Apr 25 2015
 BuildRequires: intltool libffmpegthumbnailer-devel libgtk+2-devel libstartup-notification-devel libudev-devel
-Requires: desktop-file-utils
-Requires: shared-mime-info
-# Mount without root requirement.
-Requires: udisks2
-# Plugin download.
-Requires: wget
-# Execution of SpaceFM and applications from root.
-Requires: xdg-utils
 
 %description
 A fast and lightweight, but extremly powerful, multi-paned, tabbed file manager originally forked from the 0.5 series pcmanfm as pcmanfm-mod.
@@ -34,8 +30,8 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 
 %build
 %autoreconf
-%configure --enable-pixmaps  --with-gtk2 \
-  --with-preferable-sudo=%_bindir/xdg-su
+%configure --with-gtk2 \
+           --with-preferable-sudo=%_bindir/gksu
 
 %make
 
@@ -55,8 +51,8 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 %_datadir/mime/packages/spacefm-mime.xml
 
 %changelog
-* Sat Apr 25 2015 Dmitriy Khanzhin <jinn@altlinux.org> 1.0.0-alt0.git869ce6c
-- initial build for AltLinux
+* Sun Apr 26 2015 Dmitriy Khanzhin <jinn@altlinux.org> 1.0.0-alt0.M70T.1
+- draft build for AltLinux
 
 * Tue Mar 19 2013 mournblade@gmx.us
 - 0.8.7 Upstream Release
