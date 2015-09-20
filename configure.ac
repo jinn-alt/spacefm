@@ -150,6 +150,16 @@ fi
 AC_SUBST(G_CAST_CHECKS)
 
 AC_ARG_ENABLE(
+    [glib-log-domain],
+    AS_HELP_STRING([--enable-glib-log-domain],
+                   [enable 'SpaceFM' Glib log domain (default: disable)]),
+    glib_log_domain=$enableval, glib_log_domain="no")
+
+if test x"$glib_log_domain" = "xyes"; then
+    AC_DEFINE(G_LOG_DOMAIN, "SpaceFM")
+fi
+
+AC_ARG_ENABLE(
     [hal],
     AS_HELP_STRING([--enable-hal],
                    [build with Linux HAL support (disables udisks) (default: no)]),
