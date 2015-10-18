@@ -3,8 +3,8 @@
 #
 
 Name: spacefm
-Version: 1.0.0
-Release: alt0.M70T.1
+Version: 1.0.4
+Release: alt0.1
 
 Summary: A fast, lightweight, feature-rich, multi-panel, tabbed file manager
 Summary(ru_RU.UTF-8): Легкий и быстрый файл-менеджер (форк pcmanfm 0.5)
@@ -52,6 +52,9 @@ SpaceFM — быстрый, лёгкий и расширяемый плагин�
 %_datadir/mime/packages/spacefm-mime.xml
 
 %changelog
+* Sun Oct 18 2015 Dmitriy Khanzhin <jinn@altlinux.org> 1.0.4-alt0.1
+- 1.0.4
+
 * Sun Apr 26 2015 Dmitriy Khanzhin <jinn@altlinux.org> 1.0.0-alt0.M70T.1
 - draft build for AltLinux
 
