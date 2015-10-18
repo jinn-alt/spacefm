@@ -2,10 +2,11 @@
  *      vfs-thumbnail-loader.c
  *
  *      Copyright 2008 PCMan <pcman.tw@gmail.com>
+ *      Copyright 2015 OmegaPhil <OmegaPhil@startmail.com>
  *
  *      This program is free software; you can redistribute it and/or modify
  *      it under the terms of the GNU General Public License as published by
- *      the Free Software Foundation; either version 2 of the License, or
+ *      the Free Software Foundation; either version 3 of the License, or
  *      (at your option) any later version.
  *
  *      This program is distributed in the hope that it will be useful,
@@ -155,6 +156,15 @@ gboolean on_thumbnail_idle( VFSThumbnailLoader* loader )
 
     return FALSE;
 }
+
+#if 0
+//#ifdef HAVE_FFMPEG
+/* Do nothing on ffmpeg thumbnailer library messages to silence them - note that
+ * from v2.0.11, messages are silenced by default */
+void on_video_thumbnailer_log_message(ThumbnailerLogLevel lvl, const char* msg)
+{
+}
+#endif
 
 gpointer thumbnail_loader_thread( VFSAsyncTask* task, VFSThumbnailLoader* loader )
 {
@@ -326,12 +336,13 @@ void vfs_thumbnail_loader_cancel_all_requests( VFSDir* dir, gboolean is_big )
             loader->dir->thumbnail_loader = NULL;
             
             /* FIXME: added idle_handler = 0 to prevent idle_handler being
-             * removed in vfs_thumbnail_loader_free
+             * removed in vfs_thumbnail_loader_free - BUT causes a segfault
+             * in vfs_async_task_lock ??
              * If source is removed here or in vfs_thumbnail_loader_free
              * it causes a "GLib-CRITICAL **: Source ID N was not found when
              * attempting to remove it" warning.  Such a source ID is always
              * the one added in thumbnail_loader_thread at the "add2" comment. */
-            loader->idle_handler = 0;
+            //loader->idle_handler = 0;
             
             vfs_thumbnail_loader_free( loader );
             return;
@@ -356,8 +367,15 @@ static GdkPixbuf* _vfs_thumbnail_load( const char* file_path, const char* uri,
     int i, w, h;
     struct stat statbuf;
     GdkPixbuf* thumbnail, *result = NULL;
-    int create_size = size > 128 ? 256 : 128;
-
+    int create_size;
+    
+    if ( size > 256 )
+        create_size = 512;
+    else if ( size > 128 )
+        create_size = 256;
+    else
+        create_size = 128;
+    
     gboolean file_is_video = FALSE;
 #ifdef HAVE_FFMPEG
     VFSMimeType* mimetype = vfs_mime_type_get_from_file_name( file_path );
@@ -409,11 +427,19 @@ static GdkPixbuf* _vfs_thumbnail_load( const char* file_path, const char* uri,
             mtime = statbuf.st_mtime;
     }
 
+    if ( file_is_video && time( NULL ) - mtime < 5 )
+        /* if mod time of video being thumbnailed is less than 5 sec ago,
+         * don't create a thumbnail (is copying?)
+         * FIXME: This means that a newly saved file may not show a thumbnail
+         * until refresh. */
+        return NULL;
+
     /* load existing thumbnail */
     thumbnail = gdk_pixbuf_new_from_file( thumbnail_file, NULL );
-    if ( !thumbnail || !( thumb_mtime = gdk_pixbuf_get_option( thumbnail,
+    if ( !thumbnail ||
+                !( thumb_mtime = gdk_pixbuf_get_option( thumbnail,
                                                 "tEXt::Thumb::MTime" ) ) ||
-            atol( thumb_mtime ) != mtime )
+                atol( thumb_mtime ) != mtime )
     {
         if( thumbnail )
             g_object_unref( thumbnail );
@@ -424,7 +450,11 @@ static GdkPixbuf* _vfs_thumbnail_load( const char* file_path, const char* uri,
                                             create_size, create_size, NULL );
             if ( thumbnail )
             {
+                // Note: gdk_pixbuf_apply_embedded_orientation returns a new
+                // pixbuf or same with incremented ref count, so unref
+                GdkPixbuf* thumbnail_old = thumbnail;
                 thumbnail = gdk_pixbuf_apply_embedded_orientation( thumbnail );
+                g_object_unref( thumbnail_old );
                 sprintf( mtime_str, "%lu", mtime );
                 gdk_pixbuf_save( thumbnail, thumbnail_file, "png", NULL,
                                  "tEXt::Thumb::URI", uri, "tEXt::Thumb::MTime",
@@ -436,6 +466,14 @@ static GdkPixbuf* _vfs_thumbnail_load( const char* file_path, const char* uri,
         else
         {
             video_thumbnailer* video_thumb = video_thumbnailer_create();
+
+
+            /* Setting a callback to allow silencing of stdout/stderr messages
+             * from the library. This is no longer required since v2.0.11, where
+             * silence is the default.  It can be used for debugging in 2.0.11
+             * and later. */
+            //video_thumbnailer_set_log_callback(on_video_thumbnailer_log_message);
+
             if ( video_thumb )
             {
                 video_thumb->seek_percentage = 25;

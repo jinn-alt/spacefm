@@ -2,7 +2,7 @@
  * SpaceFM ptk-handler.h
  * 
  * Copyright (C) 2015 IgnorantGuru <ignorantguru@gmx.com>
- * Copyright (C) 2013-2014 OmegaPhil <OmegaPhil+SpaceFM@gmail.com>
+ * Copyright (C) 2013-2014 OmegaPhil <OmegaPhil@startmail.com>
  * Copyright (C) 2014 IgnorantGuru <ignorantguru@gmx.com>
  * Copyright (C) 2006 Hong Jen Yee (PCMan) <pcman.tw (AT) gmail.com>
  * 
@@ -46,10 +46,14 @@ enum {
     HANDLER_MODE_FILE
 };
 
+void ptk_handler_add_new_default( int mode, const char* default_name,
+                                                gboolean start );
 void ptk_handler_add_defaults( int mode, gboolean overwrite,
                                          gboolean add_missing );
+void ptk_handler_import( int mode, GtkWidget* handler_dlg, XSet* set );
 gboolean ptk_handler_equals_default( XSet* set );
-void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
+void ptk_handler_show_config( int mode, DesktopWindow* desktop,
+                              PtkFileBrowser* file_browser,
                               XSet* def_handler_set );
 gboolean ptk_handler_values_in_list( const char* list, GSList* values,
                                      char** msg );

@@ -1186,6 +1186,7 @@ static void cb_exec_child_cleanup( GPid pid, gint status, char* tmp_file )
         unlink( tmp_file );
         g_free( tmp_file );
     }
+    printf("async child finished  pid=%d\n", pid );
 //printf("cb_exec_child_cleanup DONE\n", pid, status);
 }
 
@@ -1612,7 +1613,7 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
             if ( this_user && this_user[0] != '\0' )
             {
                 char* root_set_path= g_strdup_printf(
-                                "/etc/spacefm/%s-as-root", this_user );
+                                "%s/spacefm/%s-as-root", SYSCONFDIR, this_user );
                 write_root_settings( file, root_set_path );
                 g_free( root_set_path );
                 //g_free( this_user );  DON'T
@@ -1620,7 +1621,7 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
             else
             {
                 char* root_set_path= g_strdup_printf(
-                                "/etc/spacefm/%d-as-root", geteuid() );
+                                "%s/spacefm/%d-as-root", SYSCONFDIR, geteuid() );
                 write_root_settings( file, root_set_path );
                 g_free( root_set_path );
             }
@@ -1641,6 +1642,8 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
          * and let trap delete on exit.
 
          * These terminals will not work properly with Run As Task.
+         * ! WHEN CHANGING THIS LIST, also see similar checks in pref-dialog.c
+         * and ptk-location-view.c.
         
          * Note for konsole:  if you create a link to it and execute the
          * link, it will start a new instance (might also work for lxterminal?)
@@ -1704,7 +1707,9 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
         else
             // run as self or as root
             chmod( task->exec_script, S_IRWXU );
-        if ( task->exec_as_user && geteuid() != 0 )
+        
+        // use checksum
+        if ( geteuid() != 0 && ( task->exec_as_user || task->exec_checksum ) )
             sum_script = get_sha256sum( task->exec_script );
     }
 
@@ -1741,10 +1746,13 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
             argv[a++] = g_strdup_printf( "--disable-sm" );
             argv[a++] = g_strdup_printf( "--separate" );
         }
+        else if ( strstr( terminal, "lilyterm" ) )
+            argv[a++] = g_strdup_printf( "--separate" );
         else if ( strstr( terminal, "xfce4-terminal" )
                                 || g_str_has_suffix( terminal, "/terminal" ) )
             argv[a++] = g_strdup_printf( "--disable-server" );
 
+        // add option to execute command in terminal
         if ( strstr( terminal, "xfce4-terminal" ) 
                                 || strstr( terminal, "gnome-terminal" )
                                 || strstr( terminal, "terminator" )
@@ -1836,7 +1844,8 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
             argv[a++] = g_strdup_printf( "%s %s%s %s %s",
                                 BASHPATH,
                                 auth,
-                                !strcmp( task->exec_as_user, "root" ) ? " root" : "",
+                                !g_strcmp0( task->exec_as_user, "root" ) ?
+                                                                " root" : "",
                                 task->exec_script,
                                 sum_script );
             g_free( auth );
@@ -1845,7 +1854,7 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
         {
             argv[a++] = g_strdup( BASHPATH );
             argv[a++] = auth;
-            if ( !strcmp( task->exec_as_user, "root" ) )
+            if ( !g_strcmp0( task->exec_as_user, "root" ) )
                 argv[a++] = g_strdup( "root" );
             argv[a++] = g_strdup( task->exec_script );
             argv[a++] = g_strdup( sum_script );
@@ -1939,13 +1948,12 @@ static void vfs_file_task_exec( char* src_file, VFSFileTask* task )
 
     if ( !task->exec_sync )
     {
-        // catch termination to delete tmp
-        if ( !task->exec_keep_tmp && !task->exec_direct && task->exec_script )
-        {
-            // task can be destroyed while this watch is still active
-            g_child_watch_add( pid, (GChildWatchFunc)cb_exec_child_cleanup, 
-                                                    g_strdup( task->exec_script ) );
-        }
+        // catch termination to waitpid and delete tmp if needed
+        // task can be destroyed while this watch is still active
+        g_child_watch_add( pid, (GChildWatchFunc)cb_exec_child_cleanup,
+                             !task->exec_keep_tmp && !task->exec_direct &&
+                             task->exec_script ?
+                                g_strdup( task->exec_script ) : NULL );
         call_state_callback( task, VFS_FILE_TASK_FINISH );
         return;
     }
@@ -2255,6 +2263,7 @@ VFSFileTask* vfs_task_new ( VFSFileTaskType type,
     task->exec_is_error = FALSE;
     task->exec_scroll_lock = FALSE;
     task->exec_write_root = FALSE;
+    task->exec_checksum = FALSE;
     task->exec_set = NULL;
     task->exec_cond = NULL;
     task->exec_ptask = NULL;

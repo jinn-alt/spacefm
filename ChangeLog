@@ -1,3 +1,83 @@
+1.0.4   2015-10-17:
+    new spacefm-installer replaces self-extrct and install #571
+    README rewritten and manual updated for new installer #571
+    ifdef malloc_trim for non GlibC libraries #574
+    fix HAL build #576; fix older GTK2 build
+    Menu and Shift+F10 show side pane menus #575
+    Design Menu shown with Menu key in addition to F2 #575
+    dir tree allow keyboard navigation, keep focus #541 #575
+    dir tree double-click expands/collapses row #542 #575
+    dir tree context menu|New|Tab Here opens selected dir
+    correct location for import GTK3 bookmarks; use basename #573
+    dont continuously refresh copying video thumbnails #508
+    new in /etc/spacefm/spacefm.conf: terminal_su and graphical_su #516
+    build system now installs /etc/spacefm/spacefm.conf
+    new configure option --sysconfdir=/etc to set location of /etc
+    add new event for tab change dir evt_tab_chdir; update manual
+    replace show-menu socket method with activate for all item types
+    [Dialog] add non-visible element --click to run cmd on click #572
+    [Dialog] fix some internal var names always set to %v #572
+    increase max icon/thumbnail size from 256x256 to 512x512
+    [Debian] control libffmpegthumbnailer4 | libffmpegthumbnailer4v5 #583
+    [GTK3] fix wrong colors with dark variant of GTK themes #578
+1.0.3   2015-08-26:
+    add Devices|Settings|Auto-Mount|Mount Dirs option #548
+    proto hand keep %a for lxterminal urxvtc konsole gnome-terminal #552
+    convert non-latin keycodes to latin #57
+    lang add ltg; update it lt pt_BR
+    configure.ac define G_DISABLE_ASSERT to disable g_assert
+    rename gphoto handler as ptp; whitelist ptp #555
+    [GTK3] add icon chooser dialog #532
+    Double-click in icon chooser clicks OK
+    [GTK 3.14] Prevent empty rubberband selection GTK3.14 bug avoid #485
+    Provide export and import of handler plugin files; update manual #484
+    create %O archive in user-selected destination #562
+    fix LilyTerm not working correctly eg unzipping file #567
+    update spacefm.desktop for protocol handling
+1.0.2   2015-06-02:
+    toolbar redesign with design mode right-click ability
+    add built-in toolbar items: Show Hidden, Show Thumbnails, Large Icons
+    fix Compact view sometimes fails to scroll to selected file #502
+    malloc_trim calls to flush out the free heap back to the OS when needed
+    fix forgets compress handler after extract to #517
+    no re-import bookmarks when up-down-upgrade from < 1.0.1
+    Missing pixbuf unref in main_task_view_update_task
+    Add keyboard shortcut for handler list in handler dialogs
+    fix ftp handler ignores custom port in URL #523
+    add Run As Task option to file handlers
+    allow escape of underscore in item names #522
+    fix Item Prop context opposite of Disable is Show instead of Enable
+    get mime type icon from .local XML file before guess
+    fix right-click on Bookmarks activates bookmark after menu #521
+    fix right-click detailed view clears multiple-file selection #353
+    add icon chooser [GTK2 only, GTK3 pending]
+    add panel View context menu to main View menu
+    add View|Style|Thumbnails (global)
+    add show_thumbnails socket property
+    fix missing paths on command line hangs introduced in f167b283 #468
+    fix hang on access error on startup #539 introduced in f167b28
+    fix icon/compact view left-click doesn't unselect other files
+    write/read new mimeapps.list Default Applications #450
+    archive handlers take precedence over file handlers
+    scale menu item icons loaded from file
+    force rebuild of folder_view for font change in exo_icon_view
+    always reap async child with or without exec_keep_tmp #533
+    default scroll desktop fix openbox #524
+    always update status bar Reading msg
+    item prop dlg text view scroll add shadow #532
+    [desktop] fix linefeeds in desktop item names #543
+1.0.1   2015-05-04:
+    extended bookmarks system
+    added users manual Bookmarks section
+    fix --enable-hal build errors #496
+    fix segfault in vfs_thumbnail_loader_free on abort thumbnail loading
+    _vfs_thumbnail_load unref after gdk_pixbuf_apply_embedded_orientation
+    MIME Menu prompt before creating files
+    Open menu archive functions move to top if default
+    rewrite ptk_file_browser_refresh; reselect cursor after refresh
+    status bar shows Reading msg while dir loading #459
+    new protocol handler http/webdav to top of list
+    Bookmarks|New Bookmark default key shortcut Ctrl+D
 1.0.0   2015-04-13:
     revert desktop dialogs pop to top #424 bba93a50 dlgs on wrong desktop
     update translations cs de ja pl pt_BR ru sv tr 

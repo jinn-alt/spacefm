@@ -1,6 +1,6 @@
 ## Process this file with automake to produce Makefile.in
 
-INCLUDES = \
+AM_CPPFLAGS = \
     -I$(top_srcdir)/src/mime-type \
     -I$(top_srcdir)/src/compat \
     -I$(top_srcdir)/src/ptk \
@@ -10,7 +10,8 @@ INCLUDES = \
     -I$(top_srcdir)/src/exo \
     -DPACKAGE_DATA_DIR=\""$(datadir)/spacefm"\" \
     -DPACKAGE_UI_DIR=\""$(datadir)/spacefm/ui"\" \
-    -DPACKAGE_LOCALE_DIR=\""$(prefix)/$(DATADIRNAME)/locale"\"
+    -DPACKAGE_LOCALE_DIR=\""$(prefix)/$(DATADIRNAME)/locale"\" \
+	-DSYSCONFDIR=\""$(sysconfdir)"\"
 
 bin_PROGRAMS = spacefm
 
@@ -73,7 +74,6 @@ PTK_SOURCES = \
     ptk/ptk-dir-tree-view.c ptk/ptk-dir-tree-view.h \
     ptk/ptk-dir-tree.c ptk/ptk-dir-tree.h \
     ptk/ptk-location-view.c ptk/ptk-location-view.h \
-    ptk/ptk-bookmarks.c ptk/ptk-bookmarks.h \
     ptk/ptk-input-dialog.c ptk/ptk-input-dialog.h \
     ptk/ptk-file-task.c ptk/ptk-file-task.h \
     ptk/ptk-file-archiver.c ptk/ptk-file-archiver.h \
@@ -89,7 +89,17 @@ EXO_SOURCES = \
     exo/exo-tree-view.c exo/exo-tree-view.h \
     exo/exo-private.c exo/exo-private.h \
     exo/exo-string.c exo/exo-string.h \
-    exo/exo-marshal.c exo/exo-marshal.h
+    exo/exo-marshal.c exo/exo-marshal.h \
+    exo/exo-cell-renderer-icon.c exo/exo-cell-renderer-icon.h \
+    exo/exo-gtk-extensions.c exo/exo-gtk-extensions.h \
+    exo/exo-icon-chooser-dialog.c exo/exo-icon-chooser-dialog.h \
+    exo/exo-icon-chooser-model.c exo/exo-icon-chooser-model.h \
+    exo/exo-gdk-pixbuf-extensions.c exo/exo-gdk-pixbuf-extensions.h \
+    exo/exo-thumbnail-preview.c exo/exo-thumbnail-preview.h \
+    exo/exo-utils.c exo/exo-utils.h \
+    exo/exo-binding.c exo/exo-binding.h \
+    exo/exo-cell-renderer-ellipsized-text.c exo/exo-cell-renderer-ellipsized-text.h \
+    exo/exo-common.h
 
 COMPAT_SOURCES = \
     compat/glib-mem.h \
@@ -136,5 +146,4 @@ noinst_PROGRAMS=xml-purge
 xml_purge_SOURCES=xml-purge.c
 xml_purge_CFLAGS=@GTK_CFLAGS@
 xml_purge_LDADD=@GTK_LIBS@
-
 

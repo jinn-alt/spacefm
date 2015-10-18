@@ -698,8 +698,8 @@ void show_socket_help()
     printf( "\nspacefm -s emit-key [OPTIONS] KEYCODE [MODIFIER]\n" );
     printf( "    %s\n", _("Activates a menu item by emitting its shortcut key") );
 
-    printf( "\nspacefm -s show-menu [OPTIONS] MENUNAME\n" );
-    printf( "    %s\n", _("Shows custom submenu named MENUNAME as a popup menu") );
+    printf( "\nspacefm -s activate [OPTIONS] NAME\n" );
+    printf( "    %s\n", _("Runs custom command or shows submenu named NAME") );
 
     printf( "\nspacefm -s add-event EVENT COMMAND...\n" );
     printf( "    %s\n", _("Add asynchronous handler COMMAND to EVENT") );
@@ -761,6 +761,7 @@ void show_socket_help()
     printf( "sort_case                       1|true|yes|0|false|no\n" );
     printf( "sort_hidden_first               1|true|yes|0|false|no\n" );
     printf( "sort_first                      files|folders|mixed\n" );
+    printf( "show_thumbnails                 1|true|yes|0|false|no\n" );
     printf( "large_icons                     1|true|yes|0|false|no\n" );
     printf( "statusbar_text                  %s\n", _("eg 'Current Status: Example'") );
     printf( "pathbar_text                    [TEXT [SELSTART [SELEND]]]\n" );
@@ -816,6 +817,7 @@ void show_socket_help()
     printf( "evt_pnl_show                    %s\n", _("Panel show/hide       %e %w %p %t %f %v") );
     printf( "evt_pnl_sel                     %s\n", _("Selection changed     %e %w %p %t") );
     printf( "evt_tab_new                     %s\n", _("Tab new               %e %w %p %t") );
+    printf( "evt_tab_chdir                   %s\n", _("Tab change dir        %e %w %p %t %d") );
     printf( "evt_tab_focus                   %s\n", _("Tab focus             %e %w %p %t") );
     printf( "evt_tab_close                   %s\n", _("Tab close             %e %w %p %t") );
     printf( "evt_device                      %s\n", _("Device change         %e %f %v") );
@@ -825,6 +827,7 @@ void show_socket_help()
     printf( "%%w   %s\n", _("window ID") );
     printf( "%%p   %s\n", _("panel number (1-4)") );
     printf( "%%t   %s\n", _("tab number (1-...)") );
+    printf( "%%d   %s\n", _("quoted directory ('/etc')") );
     printf( "%%b   %s\n", _("mouse button (0=double 1=left 2=middle 3=right ...)") );
     printf( "%%k   %s\n", _("key code  (eg 0x63)") );
     printf( "%%m   %s\n", _("modifier key (eg 0x4  used with clicks and keypresses)") );
@@ -842,7 +845,7 @@ void show_socket_help()
     printf( "    spacefm -r /etc; sleep 0.3; spacefm -s set selected_filenames fstab hosts\n" );
     printf( "    spacefm -s set clipboard_copy_files /etc/fstab /etc/hosts\n" );
     printf( "    spacefm -s emit-key 0xffbe 0   # press F1 to show Help\n" );
-    printf( "    spacefm -s show-menu --window $fm_my_window \"Custom Menu\"\n" );
+    printf( "    spacefm -s activate --window $fm_my_window \"Custom Menu\"\n" );
     printf( "    spacefm -s add-event evt_pnl_sel 'spacefm -s set statusbar_text \"$fm_file\"'\n\n" );
     
     printf( "    #!%s\n", BASHPATH );
@@ -933,8 +936,6 @@ void init_folder()
 {
     if( G_LIKELY(folder_initialized) )
         return;
-
-    app_settings.bookmarks = ptk_bookmarks_get();
 
     vfs_volume_init();
     vfs_thumbnail_init();
@@ -1516,12 +1517,15 @@ int main ( int argc, char *argv[] )
 
     main_window_event( NULL, NULL, "evt_start", 0, 0, NULL, 0, 0, 0, FALSE );
 
+    /* handle_parsed_commandline_args needs to be within GDK_THREADS_ENTER or
+     * ptk_show_error() in ptk_file_browser_chdir() access err causes hang on
+     * GDK_THREADS_ENTER before gtk_main() */
+    GDK_THREADS_ENTER();
     /* handle the parsed result of command line args */
     run = handle_parsed_commandline_args();
     app_settings.load_saved_tabs = TRUE;
 
-    GDK_THREADS_ENTER();
-    if( run )   /* run the main loop */
+    if ( run )   /* run the main loop */
         gtk_main();
     GDK_THREADS_LEAVE();
 

@@ -38,7 +38,6 @@ typedef struct _FMMainWindow
     GtkWidget* tool_menu_item;
     GtkWidget* help_menu_item;
     GtkWidget* dev_menu;
-    GtkWidget* book_menu;
     GtkWidget* plug_menu;
     GtkWidget* notebook;  //MOD changed use to current panel
     GtkWidget* panel[4];
@@ -147,7 +146,10 @@ void on_close_notebook_page( GtkButton* btn, PtkFileBrowser* file_browser );
 void show_panels( GtkMenuItem* item, FMMainWindow* main_window );
 void show_panels_all_windows( GtkMenuItem* item, FMMainWindow* main_window );
 void update_views_all_windows( GtkWidget* item, PtkFileBrowser* file_browser );
-void rebuild_toolbar_all_windows( int job, PtkFileBrowser* file_browser );
+void main_window_update_all_bookmark_views();
+void main_window_toggle_thumbnails_all_windows();
+void main_window_refresh_all_tabs_matching( const char* path );
+void main_window_rebuild_all_toolbars( PtkFileBrowser* file_browser );
 gboolean main_write_exports( VFSFileTask* vtask, const char* value, FILE* file );
 void main_update_fonts( GtkWidget* widget, PtkFileBrowser* file_browser );
 void on_reorder( GtkWidget* item, GtkWidget* parent );
@@ -163,7 +165,7 @@ void main_window_on_plugins_change( FMMainWindow* main_window );
 void main_window_root_bar_all();
 void main_window_rubberband_all();
 void main_window_refresh_all();
-void main_window_update_bookmarks();
+void main_window_bookmark_changed( const char* changed_set_name );
 void main_context_fill( PtkFileBrowser* file_browser, XSetContext* c );
 void set_panel_focus( FMMainWindow* main_window, PtkFileBrowser* file_browser );
 void focus_panel( GtkMenuItem* item, gpointer mw, int p );

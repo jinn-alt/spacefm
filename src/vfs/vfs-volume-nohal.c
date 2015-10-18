@@ -2637,21 +2637,28 @@ gboolean path_is_mounted_mtab( const char* mtab_file,
     lines = NULL;
     error = NULL;
     
+    char* mtab_path = g_build_filename( SYSCONFDIR, "mtab", NULL );
+    
     if ( mtab_file )
     {
         // read from a custom mtab file, eg ~/.mtab.fuseiso
         if ( !g_file_get_contents( mtab_file, &contents, NULL, NULL ) )
-            return FALSE;
-    }
-    else if ( !g_file_get_contents( MTAB, &contents, NULL, NULL ) )
-    {
-        if ( !g_file_get_contents( "/etc/mtab", &contents, NULL, &error ) )
         {
-            g_warning ("Error reading /etc/mtab: %s", error->message);
-            g_error_free (error);
+            g_free( mtab_path );
             return FALSE;
         }
     }
+    else if ( !g_file_get_contents( MTAB, &contents, NULL, NULL ) )
+    {
+        if ( !g_file_get_contents( mtab_path, &contents, NULL, &error ) )
+        {
+            g_warning ("Error reading %s: %s", mtab_path, error->message);
+            g_error_free (error);
+            g_free( mtab_path );
+            return FALSE;
+        }
+    }
+    g_free( mtab_path );
     lines = g_strsplit( contents, "\n", 0 );
     for ( n = 0; lines[n] != NULL; n++ )
     {
@@ -2891,6 +2898,7 @@ VFSVolume* vfs_volume_read_by_mount( dev_t devnum, const char* mount_points )
     int i;
     struct stat64 statbuf;
     netmount_t *netmount = NULL;
+    XSet* set;
 
     if ( devnum == 0 || !mount_points )
         return NULL;
@@ -2991,6 +2999,14 @@ VFSVolume* vfs_volume_read_by_mount( dev_t devnum, const char* mount_points )
                    g_str_has_prefix( point, "/media/" ) ||
                    g_str_has_prefix( point, "/run/media/" ) ||
                    g_str_has_prefix( mtab_fstype, "fuse." );
+            if ( !keep )
+            {
+                // in Auto-Mount|Mount Dirs ?
+                char* mount_parent = ptk_location_view_get_mount_point_dir(
+                                                                    NULL );
+                keep = g_str_has_prefix( point, mount_parent );
+                g_free( mount_parent );
+            }
         }
         // mount point must be readable
         keep = keep && ( geteuid() == 0 || g_access( point, R_OK ) == 0 );
@@ -3190,39 +3206,6 @@ VFSVolume* vfs_volume_read_by_device( char* device_file )
     return volume;
 }
 #endif
-
-void vfs_volume_clean_mount_points()
-{
-    // clean spacefm cache dir (fuse mounts)
-    GDir *dir;
-    const gchar *name;
-    char* del_path;
-    
-    char* path = g_build_filename( g_get_user_cache_dir(), "spacefm", NULL );
-    if ( ( dir = g_dir_open( path, 0, NULL ) ) != NULL )
-    {
-        while ( ( name = g_dir_read_name( dir ) ) != NULL )
-        {
-            del_path = g_build_filename( g_get_user_cache_dir(), "spacefm",
-                                                                name, NULL );
-            rmdir( del_path );  // removes non-empty, non-mounted directories
-            g_free( del_path );
-        }
-        g_dir_close( dir );
-    }
-    g_free( path );
-
-    // clean udevil mount points
-    char* udevil = g_find_program_in_path( "udevil" );
-    if ( udevil )
-    {
-        char* line = g_strdup_printf( "bash -c \"sleep 1 ; %s clean\"", udevil );
-        //printf("Clean: %s\n", line );
-        g_free( udevil );    
-        g_spawn_command_line_async( line, NULL );
-        g_free( line );
-    }
-}
 
 char* vfs_volume_handler_cmd( int mode, int action, VFSVolume* vol,
                               const char* options, netmount_t* netmount,
@@ -3802,11 +3785,9 @@ char* vfs_volume_device_unmount_cmd( VFSVolume* vol, gboolean* run_in_terminal )
     if ( !command )
     {
         // discovery
-        if ( vol->is_mounted )
-            pointq = bash_quote( vol->device_type == DEVICE_TYPE_BLOCK ?
-                                   vol->device_file : vol->mount_point );
-        else
-            pointq = g_strdup( "''" );
+        pointq = bash_quote( vol->device_type ==
+                                DEVICE_TYPE_BLOCK || !vol->is_mounted ?
+                                    vol->device_file : vol->mount_point );
         if ( s1 = g_find_program_in_path( "udevil" ) )
         {
             // udevil
@@ -4104,6 +4085,7 @@ static void vfs_volume_device_added( VFSVolume* volume, gboolean automount )
 {           //frees volume if needed
     GList* l;
     gboolean was_mounted, was_audiocd, was_mountable;
+    char* changed_mount_point = NULL;
     
     if ( !volume || !volume->udi || !volume->device_file )
         return;
@@ -4117,6 +4099,14 @@ static void vfs_volume_device_added( VFSVolume* volume, gboolean automount )
             was_mounted = ((VFSVolume*)l->data)->is_mounted;
             was_audiocd = ((VFSVolume*)l->data)->is_audiocd;
             was_mountable = ((VFSVolume*)l->data)->is_mountable;
+
+            // detect changed mount point
+            if ( !was_mounted && volume->is_mounted )
+                changed_mount_point = g_strdup( volume->mount_point );
+            else if ( was_mounted && !volume->is_mounted )
+                changed_mount_point = g_strdup(
+                                        ((VFSVolume*)l->data)->mount_point );
+
             vfs_free_volume_members( (VFSVolume*)l->data );
             ((VFSVolume*)l->data)->udi = g_strdup( volume->udi );
             ((VFSVolume*)l->data)->device_file = g_strdup( volume->device_file );
@@ -4171,7 +4161,7 @@ static void vfs_volume_device_added( VFSVolume* volume, gboolean automount )
                     vfs_volume_exec( volume, xset_get_s( "dev_exec_unmount" ) );
                     volume->should_autounmount = FALSE;
                     //remove mount points in case other unmounted
-                    vfs_volume_clean_mount_points();
+                    ptk_location_view_clean_mount_points();
                 }
                 else if ( !was_audiocd && volume->is_audiocd )
                     vfs_volume_autoexec( volume );
@@ -4184,6 +4174,12 @@ static void vfs_volume_device_added( VFSVolume* volume, gboolean automount )
                 if ( was_mountable && !volume->is_mountable && volume->is_mounted &&
                             ( volume->is_optical || volume->is_removable ) )
                     unmount_if_mounted( volume );
+            }
+            // refresh tabs containing changed mount point
+            if ( changed_mount_point )
+            {
+                main_window_refresh_all_tabs_matching( changed_mount_point );
+                g_free( changed_mount_point );
             }
             return;
         }
@@ -4199,6 +4195,9 @@ static void vfs_volume_device_added( VFSVolume* volume, gboolean automount )
         if ( volume->is_audiocd )
             vfs_volume_autoexec( volume );
     }
+    // refresh tabs containing changed mount point
+    if ( volume->is_mounted && volume->mount_point )
+        main_window_refresh_all_tabs_matching( volume->mount_point );
 }
 
 static gboolean vfs_volume_nonblock_removed( dev_t devnum )
@@ -4222,7 +4221,7 @@ static gboolean vfs_volume_nonblock_removed( dev_t devnum )
             call_callbacks( volume, VFS_VOLUME_REMOVED );
             vfs_free_volume_members( volume );
             g_slice_free( VFSVolume, volume );
-            vfs_volume_clean_mount_points();
+            ptk_location_view_clean_mount_points();
             return TRUE;
         }
     }
@@ -4252,12 +4251,14 @@ static void vfs_volume_device_removed( struct udev_device* udevice )
                 unmount_if_mounted( volume );
             volumes = g_list_remove( volumes, volume );
             call_callbacks( volume, VFS_VOLUME_REMOVED );
+            if ( volume->is_mounted && volume->mount_point )
+                main_window_refresh_all_tabs_matching( volume->mount_point );
             vfs_free_volume_members( volume );
             g_slice_free( VFSVolume, volume );
             break;
         }
     }
-    vfs_volume_clean_mount_points();
+    ptk_location_view_clean_mount_points();
 }
 
 void unmount_if_mounted( VFSVolume* vol )
@@ -4269,13 +4270,16 @@ void unmount_if_mounted( VFSVolume* vol )
     if ( !str )
         return;
 
+    char* mtab_path = g_build_filename( SYSCONFDIR, "mtab", NULL );
+
     char* mtab = MTAB;
     if ( !g_file_test( mtab, G_FILE_TEST_EXISTS ) )
-        mtab = "/etc/mtab";
+        mtab = mtab_path;
 
     char* line = g_strdup_printf( "grep -qs '^%s ' %s 2>/dev/null || exit\n%s\n",
                                                 vol->device_file, mtab, str );
     g_free( str );
+    g_free( mtab_path );
     printf( _("Unmount-If-Mounted: %s\n"), line );
     exec_task( line, run_in_terminal );
     g_free( line );
@@ -4295,7 +4299,7 @@ gboolean vfs_volume_init()
     VFSVolume* volume;
 
     // remove unused mount points
-    vfs_volume_clean_mount_points();
+    ptk_location_view_clean_mount_points();
 
     // create udev
     udev = udev_new();
@@ -4450,7 +4454,7 @@ gboolean vfs_volume_finalize()
     volumes = NULL;
 
     // remove unused mount points
-    vfs_volume_clean_mount_points();
+    ptk_location_view_clean_mount_points();
     
     return TRUE;
 }

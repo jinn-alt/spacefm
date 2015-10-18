@@ -1,7 +1,7 @@
 /*
  * SpaceFM ptk-file-archiver.h
  * 
- * Copyright (C) 2013-2014 OmegaPhil <OmegaPhil+SpaceFM@gmail.com>
+ * Copyright (C) 2013-2014 OmegaPhil <OmegaPhil@startmail.com>
  * Copyright (C) 2014 IgnorantGuru <ignorantguru@gmx.com>
  * Copyright (C) 2006 Hong Jen Yee (PCMan) <pcman.tw (AT) gmail.com>
  * 
@@ -35,7 +35,8 @@ void ptk_file_archiver_create( DesktopWindow *desktop,
 void ptk_file_archiver_extract( DesktopWindow *desktop,
                                 PtkFileBrowser *file_browser,
                                 GList *files, const char *cwd,
-                                const char *dest_dir, int job );
+                                const char *dest_dir, int job,
+                                gboolean archive_presence_checked );
 
 // At least a mime type or extension is required - mime type preferred
 gboolean ptk_file_archiver_is_format_supported( VFSMimeType* mime,

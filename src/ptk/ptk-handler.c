@@ -1,9 +1,8 @@
 /*
  * SpaceFM ptk-handler.c
  * 
- * Copyright (C) 2015 IgnorantGuru <ignorantguru@gmx.com>
- * Copyright (C) 2013-2014 OmegaPhil <OmegaPhil+SpaceFM@gmail.com>
- * Copyright (C) 2014 IgnorantGuru <ignorantguru@gmx.com>
+ * Copyright (C) 2014-2015 IgnorantGuru <ignorantguru@gmx.com>
+ * Copyright (C) 2013-2015 OmegaPhil <OmegaPhil@startmail.com>
  * Copyright (C) 2006 Hong Jen Yee (PCMan) <pcman.tw (AT) gmail.com>
  * 
  * License: See COPYING file
@@ -16,11 +15,20 @@
 #include <fnmatch.h>
 #include <errno.h>
 #include <gdk/gdkkeysyms.h>
+#include <sys/wait.h>   // WIFEXITED
 
 #include "ptk-handler.h"
 #include "exo-tree-view.h"
 #include "gtk2-compat.h"
 
+
+enum {
+    HANDLER_JOB_EXPORT,
+    HANDLER_JOB_IMPORT_FILE,
+    HANDLER_JOB_IMPORT_URL,
+    HANDLER_JOB_RESTORE_ALL,
+    HANDLER_JOB_REMOVE
+};
 
 // Archive handlers treeview model enum
 enum {
@@ -68,6 +76,14 @@ const char* dialog_titles[] =
     N_("File Handlers")
 };
 
+const char* dialog_mnemonics[] =
+{
+    N_("Archive Hand_lers"),
+    N_("Device Hand_lers"),
+    N_("Protocol Hand_lers"),
+    N_("File Hand_lers")
+};
+
 const char* modes[] = { "archive", "device", "protocol", "file" };
 const char* cmds_arc[] = { "compress", "extract", "list" };
 const char* cmds_mnt[] = { "mount", "unmount", "info" };
@@ -82,6 +98,8 @@ typedef struct
     GtkWidget* parent;
     int mode;
     gboolean changed;
+    PtkFileBrowser* browser;
+    DesktopWindow* desktop;
     
     GtkWidget* view_handlers;
     GtkListStore* list;
@@ -112,26 +130,26 @@ typedef struct
     GtkWidget* btn_cancel;
     GtkWidget* btn_defaults;
     GtkWidget* btn_defaults0;
+    GtkWidget* icon_choose_btn;
 } HandlerData;
 
 typedef struct _Handler
 {
-                                // enabled           set->b
-    const char* xset_name;      //                   set->name
-    const char* handler_name;   //                   set->menu_label
-    const char* type;           // or whitelist      set->s
-    const char* ext;            // or blacklist      set->x
-    const char* compress_cmd;   // or mount          (script)
-    gboolean compress_term;     //                   set->in_terminal
-    const char* extract_cmd;    // or unmount        (script)
-    gboolean extract_term;      //                   set->keep_terminal
-    const char* list_cmd;       // or info           (script)
-    gboolean list_term;         //                   set->scroll_lock
-    
-    /* save as custom item
-    set->lock = FALSE;
-    if handler equals default, don't save in session
-    set->disable = TRUE; */
+                                // enabled              set->b
+    const char* xset_name;      //                      set->name
+    const char* handler_name;   //                      set->menu_label
+    const char* type;           // or whitelist         set->s
+    const char* ext;            // or blacklist         set->x
+    const char* compress_cmd;   // or mount             (script)
+    gboolean compress_term;     //                      set->in_terminal
+    const char* extract_cmd;    // or unmount           (script)
+    gboolean extract_term;      // or run task file     set->keep_terminal
+    const char* list_cmd;       // or info              (script)
+    gboolean list_term;         //                      set->scroll_lock
+/*  save as custom item                                 set->lock = FALSE
+    if handler equals default, don't save in session    set->disable = TRUE
+    icon (file handlers only)                           set->icon
+*/
 } Handler;
 
 /* If you add a new handler, add it to (end of ) existing session file handler
@@ -290,7 +308,7 @@ const Handler handlers_fs[]=
         "fuseiso unmount",
         "*fuseiso",
         "",
-        "# Mounting of iso files is performed by fuseiso in a file handler,\n# not this device handler.  Right-click on any file and select\n# Open|Handlers, and select Mount ISO to see this command.",
+        "# Mounting of iso files is performed by fuseiso in a file handler,\n# not this device handler.  Right-click on any file and select\n# Open|File Handlers, and select Mount ISO to see this command.",
         FALSE,
         "fusermount -u \"%a\"",
         FALSE,
@@ -302,7 +320,7 @@ const Handler handlers_fs[]=
         "udevil iso unmount",
         "iso9660",
         "",
-        "# Mounting of iso files is performed by udevil in a file handler,\n# not this device handler.  Right-click on any file and select\n# Open|Handlers, and select Mount ISO to see this command.",
+        "# Mounting of iso files is performed by udevil in a file handler,\n# not this device handler.  Right-click on any file and select\n# Open|File Handlers, and select Mount ISO to see this command.",
         FALSE,
         "# Note: non-iso9660 types will fall through to Default unmount handler\nudevil umount \"%a\"\n",
         FALSE,
@@ -349,11 +367,23 @@ const Handler handlers_net[]=
     *      eg: +ssh url=ssh://*
     */
     {
+        "hand_net_+http",
+        "http & webdav",
+        "http https webdav davfs mtab_fs=davfs*",
+        "",
+        "# This handler opens http:// and webdav://\n\n# Set your web browser in Help|Options|Browser\n\n# set missing_davfs=1 if you always want to open http in web browser\n# set missing_davfs=0 if you always want to mount http with davfs\nmissing_davfs=\n\nif [ -z \"$missing_davfs\" ]; then\n    grep -s '^allowed_types *=.*davfs' /etc/udevil/udevil.conf 2>/dev/null\n    missing_davfs=$?  \nfi\nif [ \"$fm_url_proto\" = \"webdav\" ] || [ \"$fm_url_proto\" = \"davfs\" ] || \\\n            [ $missing_davfs -eq 0 ]; then\n    fm_url=\"${fm_url/webdav:\\/\\//http://}\"\n    fm_url=\"${fm_url/davfs:\\/\\//http://}\"\n    # attempt davfs mount in terminal\n    spacefm -s run-task cmd --terminal \\\n        \"udevil mount '$fm_url' || ( echo; echo 'Press Enter to close:'; read )\"\n    exit\nfi\n# open in web browser\nspacefm -s run-task web \"$fm_url\"\n",
+        FALSE,
+        "udevil umount \"%a\"",
+        FALSE,
+        INFO_EXAMPLE,
+        FALSE
+    },
+    {
         "hand_net_+ftp",
         "ftp",
         "ftp",
         "",
-        "options=\"nonempty\"\nif [ -n \"%user%\" ]; then\n    user=\",user=%user%\"\n    [[ -n \"%pass%\" ]] && user=\"$user:%pass%\"\nfi\n[[ -n \"%port%\" ]] && portcolon=:\necho \">>> curlftpfs -o $options$user ftp://%host%$portcolon%port%%path% %a\"\necho\ncurlftpfs -o $options$user ftp://%host%$portcolon%port%%path% \"%a\"\n[[ $? -eq 0 ]] && sleep 1 && ls \"%a\"  # set error status or wait until ready\n",
+        "options=\"nonempty\"\nif [ -n \"%user%\" ]; then\n    user=\",user=%user%\"\n    [[ -n \"%pass%\" ]] && user=\"$user:%pass%\"\nfi\n[[ -n \"%port%\" ]] && portcolon=:\necho \">>> curlftpfs -o $options$user ftp://%host%${portcolon}%port%%path% %a\"\necho\ncurlftpfs -o $options$user ftp://%host%${portcolon}%port%%path% \"%a\"\n[[ $? -eq 0 ]] && sleep 1 && ls \"%a\"  # set error status or wait until ready\n",
         TRUE,
         "fusermount -u \"%a\"",
         FALSE,
@@ -386,8 +416,8 @@ const Handler handlers_net[]=
     },
     {
         "hand_net_+gphoto",
-        "gphoto",
-        "gphoto mtab_fs=fuse.gphotofs",
+        "ptp",
+        "ptp gphoto mtab_fs=fuse.gphotofs",
         "",
         "gphotofs \"%a\"",
         FALSE,
@@ -461,16 +491,17 @@ const Handler handlers_net[]=
 const Handler handlers_file[]=
 {
     /* %a custom mount point
-     * Plus standard bash variables are accepted. */
+     * Plus standard bash variables are accepted.
+     * For file handlers, extract_term is used for Run As Task. */
     {
         "hand_f_+iso",
         "Mount ISO",
         "application/x-iso9660-image application/x-iso-image application/x-cd-image",
         "*.img *.iso *.mdf *.nrg",
-        "# Note: Unmounting of iso files is performed by the fuseiso or udevil device\n# handler, not this handler.\n\n# Use fuseiso or udevil ?\nfuse=\"$(which fuseiso)\"  # remove this line to use udevil only\nif [[ -z \"$fuse\" ]]; then\n    udevil=\"$(which udevil)\"\n    if [[ -z \"$udevil\" ]]; then\n        echo \"You must install fuseiso or udevil to mount ISOs with this handler.\"\n        exit 1\n    fi\n    # use udevil - attempt mount\n    uout=\"$($udevil mount \"$fm_file\" 2>&1)\"\n    err=$?; echo \"$uout\"\n    if [ $err -eq 2 ]; then\n        # is file already mounted? (english only)\n        point=\"${uout#* is already mounted at }\"\n        if [ \"$point\" != \"$uout\" ]; then\n            point=\"${point% (*}\"\n            if [ -x \"$point\" ]; then\n                spacefm -t \"$point\"\n                exit 0\n            fi\n        fi\n    fi\n    [[ $err -ne 0 ]] && exit 1\n    point=\"${uout#Mounted }\"\n    [[ \"$point\" = \"$uout\" ]] && exit 0\n    point=\"${point##* at }\"\n    [[ -d \"$point\" ]] && spacefm \"$point\" &\n    exit 0\nfi\n# use fuseiso - is file already mounted?\ncanon=\"$(readlink -f \"$fm_file\" 2>/dev/null)\"\nif [ -n \"$canon\" ]; then\n    canon_enc=\"${canon// /\\\\040}\" # encode spaces for mtab+grep\n    if grep -q \"^$canon_enc \" ~/.mtab.fuseiso 2>/dev/null; then\n        # file is mounted - get mount point\n        point=\"$(grep -m 1 \"^$canon_enc \" ~/.mtab.fuseiso \\\n                 | sed 's/.* \\(.*\\) fuseiso .*/\\1/' )\"\n    if [ -x \"$point\" ]; then\n            spacefm \"$point\" &\n            exit\n        fi\n    fi\nfi\n# mount & open\nfuseiso %f %a && spacefm %a &\n",
+        "# Note: Unmounting of iso files is performed by the fuseiso or udevil device\n# handler, not this file handler.\n\n# Use fuseiso or udevil ?\nfuse=\"$(which fuseiso)\"  # remove this line to use udevil only\nif [[ -z \"$fuse\" ]]; then\n    udevil=\"$(which udevil)\"\n    if [[ -z \"$udevil\" ]]; then\n        echo \"You must install fuseiso or udevil to mount ISOs with this handler.\"\n        exit 1\n    fi\n    # use udevil - attempt mount\n    uout=\"$($udevil mount \"$fm_file\" 2>&1)\"\n    err=$?; echo \"$uout\"\n    if [ $err -eq 2 ]; then\n        # is file already mounted? (english only)\n        point=\"${uout#* is already mounted at }\"\n        if [ \"$point\" != \"$uout\" ]; then\n            point=\"${point% (*}\"\n            if [ -x \"$point\" ]; then\n                spacefm -t \"$point\"\n                exit 0\n            fi\n        fi\n    fi\n    [[ $err -ne 0 ]] && exit 1\n    point=\"${uout#Mounted }\"\n    [[ \"$point\" = \"$uout\" ]] && exit 0\n    point=\"${point##* at }\"\n    [[ -d \"$point\" ]] && spacefm \"$point\" &\n    exit 0\nfi\n# use fuseiso - is file already mounted?\ncanon=\"$(readlink -f \"$fm_file\" 2>/dev/null)\"\nif [ -n \"$canon\" ]; then\n    canon_enc=\"${canon// /\\\\040}\" # encode spaces for mtab+grep\n    if grep -q \"^$canon_enc \" ~/.mtab.fuseiso 2>/dev/null; then\n        # file is mounted - get mount point\n        point=\"$(grep -m 1 \"^$canon_enc \" ~/.mtab.fuseiso \\\n                 | sed 's/.* \\(.*\\) fuseiso .*/\\1/' )\"\n    if [ -x \"$point\" ]; then\n            spacefm \"$point\" &\n            exit\n        fi\n    fi\nfi\n# mount & open\nfuseiso %f %a && spacefm %a &\n",
         FALSE,
         "",
-        FALSE,
+        TRUE,  // Run As Task
         "",
         FALSE
     }
@@ -481,6 +512,7 @@ static void on_configure_handler_enabled_check( GtkToggleButton *togglebutton,
                                                 HandlerData* hnd );
 static void restore_defaults( HandlerData* hnd, gboolean all );
 static gboolean validate_archive_handler( HandlerData* hnd );
+static void on_options_button_clicked( GtkWidget* btn, HandlerData* hnd );
 
 gboolean ptk_handler_command_is_empty( const char* command )
 {
@@ -1002,6 +1034,99 @@ GSList* ptk_handler_file_has_handlers( int mode, int cmd,
     return g_slist_reverse( handlers );
 }
 
+void ptk_handler_add_new_default( int mode, const char* default_name,
+                                                gboolean start )
+{
+    // This function adds a new default handler to the handlers list
+    // If start, it adds it to the start of the list, otherwise end
+    int i, nelements;
+    char* list;
+    char* str;
+    XSet* set;
+    XSet* set_conf;
+    const Handler* handler;
+    
+    if ( mode == HANDLER_MODE_ARC )
+        nelements = G_N_ELEMENTS( handlers_arc );
+    else if ( mode == HANDLER_MODE_FS )
+        nelements = G_N_ELEMENTS( handlers_fs );
+    else if ( mode == HANDLER_MODE_NET )
+        nelements = G_N_ELEMENTS( handlers_net );
+    else if ( mode == HANDLER_MODE_FILE )
+        nelements = G_N_ELEMENTS( handlers_file );
+    else
+        return;
+    set_conf = xset_get( handler_conf_xset[mode] );
+    list = g_strdup( set_conf->s );
+
+    if ( !list )
+    {
+        // create default list - eg sets arc_conf2 ->s
+        list = g_strdup( "" );
+    }
+    else if ( strstr( list, default_name ) )
+    {
+        // already exists in list
+        g_free( list );
+        return;
+    }
+    
+    for ( i = 0; i < nelements; i++ )
+    {
+        if ( mode == HANDLER_MODE_ARC )
+            handler = &handlers_arc[i];
+        else if ( mode == HANDLER_MODE_FS )
+            handler = &handlers_fs[i];
+        else if ( mode == HANDLER_MODE_NET )
+            handler = &handlers_net[i];
+        else
+            handler = &handlers_file[i];
+
+        if ( !g_strcmp0( handler->xset_name, default_name ) )
+        {
+            // found handler
+            // add default handler to the list
+            if ( start )
+            {
+                str = list;
+                list = g_strdup_printf( "%s%s%s", handler->xset_name,
+                                                list[0] ? " " : "", list );
+                g_free( str );
+            }
+            else
+            {
+                str = list;
+                list = g_strconcat( list, list[0] ? " " : "",
+                                                handler->xset_name, NULL );
+                g_free( str );
+            }
+            set = xset_is( handler->xset_name );
+            // create xset if missing
+            if ( !set )
+                set = xset_get( handler->xset_name );
+            // set handler values to defaults
+            string_copy_free( &set->menu_label, handler->handler_name );
+            string_copy_free( &set->s, handler->type );
+            string_copy_free( &set->x, handler->ext );
+            set->in_terminal = handler->compress_term ?
+                                        XSET_B_TRUE : XSET_B_UNSET;
+            // extract in terminal or (file handler) run as task
+            set->keep_terminal = handler->extract_term ?
+                                            XSET_B_TRUE : XSET_B_UNSET;
+            if ( mode != HANDLER_MODE_FILE )
+                set->scroll_lock = handler->list_term ?
+                                            XSET_B_TRUE : XSET_B_UNSET;
+            set->b = XSET_B_TRUE;
+            set->lock = FALSE;
+            // handler equals default, so don't save in session
+            set->disable = TRUE;
+        }
+    }
+    // update handler list
+    g_free( set_conf->s );
+    set_conf->s = list;
+}
+
 void ptk_handler_add_defaults( int mode, gboolean overwrite,
                                          gboolean add_missing )
 {
@@ -1072,13 +1197,12 @@ void ptk_handler_add_defaults( int mode, gboolean overwrite,
                 string_copy_free( &set->x, handler->ext );
                 set->in_terminal = handler->compress_term ?
                                             XSET_B_TRUE : XSET_B_UNSET;
-                if ( mode != HANDLER_MODE_FILE )
-                {
-                    set->keep_terminal = handler->extract_term ?
+                // extract in terminal or (file handler) run as task
+                set->keep_terminal = handler->extract_term ?
                                                 XSET_B_TRUE : XSET_B_UNSET;
+                if ( mode != HANDLER_MODE_FILE )
                     set->scroll_lock = handler->list_term ?
                                                 XSET_B_TRUE : XSET_B_UNSET;
-                }
                 set->b = XSET_B_TRUE;
                 set->lock = FALSE;
                 // handler equals default, so don't save in session
@@ -1113,6 +1237,146 @@ XSet* add_new_handler( int mode )
     g_free( name );
     set->lock = FALSE;
     return set;
+}
+
+void ptk_handler_import( int mode, GtkWidget* handler_dlg, XSet* set )
+{
+    // Adding new handler as a copy of the imported plugin set
+    XSet* new_handler_xset = add_new_handler( mode );
+    new_handler_xset->b = set->b;
+    new_handler_xset->disable = FALSE;  // not default - save in session
+    new_handler_xset->menu_label = g_strdup( set->menu_label );
+    new_handler_xset->icon = g_strdup( set->icon );
+    new_handler_xset->s = g_strdup( set->s );  // Mime Type(s) or whitelist
+    new_handler_xset->x = g_strdup( set->x );  // Extension(s) or blacklist
+    new_handler_xset->in_terminal = set->in_terminal;
+    new_handler_xset->keep_terminal = set->keep_terminal;
+    new_handler_xset->scroll_lock = set->scroll_lock;
+
+    // build copy scripts command
+    char* path_src = g_build_filename( set->plug_dir, set->plug_name, NULL );
+    char* path_dest = g_build_filename( xset_get_config_dir(), "scripts", NULL );
+    g_mkdir_with_parents( path_dest, 0700 );
+    chmod( path_dest, 0700 );
+    g_free( path_dest );
+    path_dest = g_build_filename( xset_get_config_dir(), "scripts",
+                                            new_handler_xset->name, NULL );
+    char* command = g_strdup_printf( "cp -a %s %s", path_src, path_dest );
+    g_free( path_src );
+
+    // run command
+    char* stdout = NULL;
+    char* stderr = NULL;
+    char* msg;
+    gboolean ret;
+    gint exit_status;
+    printf( "COMMAND=%s\n", command );
+    ret = g_spawn_command_line_sync( command, &stdout, &stderr, &exit_status,
+                                                                    NULL );
+    g_free( command );
+    printf( "%s%s", stdout, stderr );
+
+    if ( !ret || ( exit_status && WIFEXITED( exit_status ) ) )
+    {
+        msg = g_strdup_printf( _("An error occured copying command files\n\n%s"),
+                                                        stderr ? stderr : "" );
+        GDK_THREADS_ENTER(); // due to dialog run causes low level thread lock
+        xset_msg_dialog( NULL, GTK_MESSAGE_ERROR, _("Copy Command Error"), NULL,
+                                                        0, msg, NULL, NULL );
+        GDK_THREADS_LEAVE();
+        g_free( msg );
+    }
+    if ( stderr )
+        g_free( stderr );
+    if ( stdout )
+        g_free( stdout );
+    stderr = stdout = NULL;
+    command = g_strdup_printf( "chmod -R go-rwx %s", path_dest );
+    printf( "COMMAND=%s\n", command );
+    g_spawn_command_line_sync( command, NULL, NULL, NULL, NULL );
+    g_free( command );
+    g_free( path_dest );
+    
+    // add to handler list
+    if ( g_strcmp0( xset_get_s( handler_conf_xset[mode] ), "" ) <= 0 )
+    {
+        // No handlers present - adding new handler
+        xset_set( handler_conf_xset[mode], "s", new_handler_xset->name );
+    }
+    else
+    {
+        // Adding new handler to handlers
+        gchar* new_handlers_list = g_strdup_printf( "%s %s",
+                            new_handler_xset->name,
+                            xset_get_s( handler_conf_xset[mode] ) );
+        xset_set( handler_conf_xset[mode], "s", new_handlers_list );
+        g_free( new_handlers_list );
+    }    
+
+    // have handler dialog open?
+    HandlerData* hnd = handler_dlg && GTK_IS_WIDGET( handler_dlg ) ?
+                    (HandlerData*)g_object_get_data( G_OBJECT( handler_dlg ),
+                                                                    "hnd" ) :
+                    NULL;
+    if ( !( hnd && hnd->dlg == handler_dlg && hnd->mode == mode ) )
+    {
+        // dialog not shown or invalid
+        const char* mode_name;
+        if ( mode == HANDLER_MODE_ARC )
+            mode_name = _("Archive");
+        else if ( mode == HANDLER_MODE_FS )
+            mode_name = _("Device");
+        else if ( mode == HANDLER_MODE_NET )
+            mode_name = _("Protocol");
+        else if ( mode == HANDLER_MODE_FILE )
+            mode_name = _("File");
+        else
+            return;  // failsafe
+        msg = g_strdup_printf( _("The selected %s Handler file has been imported to the %s Handlers list."),
+                                                    mode_name, mode_name );
+        GDK_THREADS_ENTER(); // due to dialog run causes low level thread lock
+        xset_msg_dialog( NULL, GTK_MESSAGE_INFO, _("Handler Imported"),
+                                                NULL, 0, msg, NULL, NULL );
+        GDK_THREADS_LEAVE();
+        g_free( msg );
+        return;
+    }
+
+    // Have valid handler data and dialog
+    
+    // Obtaining appending iterator for treeview model
+    GtkTreeIter iter;
+    gtk_list_store_prepend( GTK_LIST_STORE( hnd->list ), &iter );
+
+    // Adding handler to model
+    const char* disabled = hnd->mode == HANDLER_MODE_FILE ?
+                                        _("(optional)") :
+                                        _("(disabled)");
+    char* dis_name = g_strdup_printf( "%s %s",
+                                new_handler_xset->menu_label,
+                                new_handler_xset->b == XSET_B_TRUE ? "" :
+                                    disabled );
+    gtk_list_store_set( GTK_LIST_STORE( hnd->list ), &iter,
+                        COL_XSET_NAME, new_handler_xset->name,
+                        COL_HANDLER_NAME, dis_name,
+                        -1 );
+    g_free( dis_name );
+    
+    // Activating the new handler - the normal loading code
+    // automatically kicks in
+    GtkTreePath* new_handler_path = gtk_tree_model_get_path(
+                                                GTK_TREE_MODEL( hnd->list ),
+                                                &iter );
+    gtk_tree_view_set_cursor( GTK_TREE_VIEW( hnd->view_handlers ),
+                                    new_handler_path, NULL, FALSE );
+    gtk_tree_path_free( new_handler_path );
+
+    // Making sure the remove and apply buttons are sensitive
+    gtk_widget_set_sensitive( hnd->btn_remove, TRUE );
+    gtk_widget_set_sensitive( hnd->btn_apply, FALSE );
+
+    hnd->changed = hnd->compress_changed = hnd->extract_changed =
+                                            hnd->list_changed = FALSE;
 }
 
 static void config_load_handler_settings( XSet* handler_xset,
@@ -1451,6 +1715,8 @@ static void on_configure_button_press( GtkButton* widget, HandlerData* hnd )
         xset_set_set( new_handler_xset, "x", handler_extension );  // Extension(s) or blacklist
         new_handler_xset->in_terminal = handler_compress_term ?
                                                 XSET_B_TRUE : XSET_B_UNSET;
+        new_handler_xset->keep_terminal = handler_extract_term ?
+                                                XSET_B_TRUE : XSET_B_UNSET;
         err_msg = ptk_handler_save_script( hnd->mode, HANDLER_COMPRESS,
                                 new_handler_xset,
                                 GTK_TEXT_VIEW( hnd->view_handler_compress ), NULL );
@@ -1461,8 +1727,6 @@ static void on_configure_button_press( GtkButton* widget, HandlerData* hnd )
         }
         else
         {
-            new_handler_xset->keep_terminal = handler_extract_term ?
-                                                    XSET_B_TRUE : XSET_B_UNSET;
             new_handler_xset->scroll_lock = handler_list_term ?
                                                     XSET_B_TRUE : XSET_B_UNSET;
             if ( !err_msg )
@@ -1567,6 +1831,8 @@ static void on_configure_button_press( GtkButton* widget, HandlerData* hnd )
         xset_set_set( handler_xset, "x", handler_extension );
         handler_xset->in_terminal = handler_compress_term ?
                                                 XSET_B_TRUE : XSET_B_UNSET;
+        handler_xset->keep_terminal = handler_extract_term ?
+                                                XSET_B_TRUE : XSET_B_UNSET;
         if ( hnd->compress_changed || was_default )
         {
             err_msg = ptk_handler_save_script( hnd->mode, HANDLER_COMPRESS,
@@ -1580,8 +1846,6 @@ static void on_configure_button_press( GtkButton* widget, HandlerData* hnd )
         }
         else
         {
-            handler_xset->keep_terminal = handler_extract_term ?
-                                                    XSET_B_TRUE : XSET_B_UNSET;
             handler_xset->scroll_lock = handler_list_term ?
                                                     XSET_B_TRUE : XSET_B_UNSET;
             if ( hnd->extract_changed || was_default )
@@ -1855,7 +2119,7 @@ static gboolean on_handlers_key_press( GtkWidget* widget, GdkEventKey* evt,
                                        HandlerData* hnd )
 {
     // Current handler hasn't been changed?
-    if ( !gtk_widget_get_sensitive( hnd->btn_apply ) )
+    if ( !hnd->changed /* was !gtk_widget_get_sensitive( hnd->btn_apply )*/ )
         return FALSE;
 
     if ( xset_msg_dialog( hnd->dlg, GTK_MESSAGE_QUESTION,
@@ -1864,7 +2128,8 @@ static gboolean on_handlers_key_press( GtkWidget* widget, GdkEventKey* evt,
                           _("Apply changes to the current handler?"),
                           NULL, NULL ) == GTK_RESPONSE_YES )
         on_configure_button_press( GTK_BUTTON( hnd->btn_apply ), hnd );
-    
+    else
+        hnd->changed = FALSE;
     return TRUE;  // FALSE doesn't retain key after dialog shown
 }
 
@@ -1872,50 +2137,66 @@ static gboolean on_handlers_button_press( GtkWidget* view,
                                           GdkEventButton* evt,
                                           HandlerData* hnd )
 {
-    // Current handler hasn't been changed?
-    if ( !gtk_widget_get_sensitive( hnd->btn_apply ) )
-        return FALSE;
-    
-    GtkTreeModel * model;
+    GtkTreeModel* model;
     GtkTreePath* tree_path = NULL;
     GtkTreeIter it;
     GtkTreeIter it_sel;
     GtkTreeSelection* selection;
     gboolean item_clicked = FALSE;
+    gboolean ret = FALSE;
     
     // get clicked item
-    model = gtk_tree_view_get_model( GTK_TREE_VIEW( view ) );
-    selection = gtk_tree_view_get_selection(
-                            GTK_TREE_VIEW( hnd->view_handlers ) );
-    if ( !( selection && gtk_tree_selection_get_selected(
-                                    selection, &model, &it_sel ) ) )
-    {
-        // no item is selected
-        gtk_tree_path_free( tree_path );
-        return FALSE;
-    }
     if ( gtk_tree_view_get_path_at_pos( GTK_TREE_VIEW( view ),
-                                        evt->x, evt->y, &tree_path,
-                                        NULL, NULL, NULL ) )
+                                                evt->x, evt->y, &tree_path,
+                                                NULL, NULL, NULL ) )
     {
+        model = gtk_tree_view_get_model( GTK_TREE_VIEW( view ) );
         if ( gtk_tree_model_get_iter( model, &it, tree_path ) )
             item_clicked = TRUE;
     }
-    if ( xset_msg_dialog( hnd->dlg, GTK_MESSAGE_QUESTION,
-                          _("Apply Changes ?"), NULL,
-                          GTK_BUTTONS_YES_NO,
-                          _("Apply changes to the current handler?"),
-                          NULL, NULL ) == GTK_RESPONSE_YES )
-        on_configure_button_press( GTK_BUTTON( hnd->btn_apply ), hnd );
-    if ( item_clicked )
-        gtk_tree_view_set_cursor(GTK_TREE_VIEW( hnd->view_handlers ),
-                                    tree_path, NULL, FALSE);
-    else if ( selection )
-        gtk_tree_selection_unselect_all( selection );
+    
+    // Current handler has been changed?
+    if ( gtk_widget_get_sensitive( hnd->btn_apply ) )
+    {
+        // Query apply changes
+        if ( xset_msg_dialog( hnd->dlg, GTK_MESSAGE_QUESTION,
+                              _("Apply Changes ?"), NULL,
+                              GTK_BUTTONS_YES_NO,
+                              _("Apply changes to the current handler?"),
+                              NULL, NULL ) == GTK_RESPONSE_YES )
+            on_configure_button_press( GTK_BUTTON( hnd->btn_apply ), hnd );
 
+        // Move cursor or unselect
+        if ( item_clicked )
+            // select clicked item
+            gtk_tree_view_set_cursor(GTK_TREE_VIEW( hnd->view_handlers ),
+                                        tree_path, NULL, FALSE);
+        else if ( selection = gtk_tree_view_get_selection(
+                                    GTK_TREE_VIEW( hnd->view_handlers ) ) )
+            // unselect all
+            gtk_tree_selection_unselect_all( selection );
+        ret = TRUE;
+    }
+    else if ( evt->button == 3 )
+    {
+        // right click - Move cursor or unselect
+        if ( item_clicked )
+            // select clicked item
+            gtk_tree_view_set_cursor(GTK_TREE_VIEW( hnd->view_handlers ),
+                                        tree_path, NULL, FALSE);
+        else if ( selection = gtk_tree_view_get_selection(
+                                    GTK_TREE_VIEW( hnd->view_handlers ) ) )
+            // unselect all
+            gtk_tree_selection_unselect_all( selection );
+        
+        // show menu
+        on_options_button_clicked( NULL, hnd );
+        ret = TRUE;
+    }
+    
     if ( tree_path )
         gtk_tree_path_free( tree_path );
-    return TRUE;
+    return ret;
 }
 
 #if 0
@@ -2044,11 +2325,9 @@ static void restore_defaults( HandlerData* hnd, gboolean all )
         set->s = (char*)handler->type;
         set->x = (char*)handler->ext;
         set->in_terminal = handler->compress_term ? XSET_B_TRUE : XSET_B_UNSET;
+        set->keep_terminal = handler->extract_term ? XSET_B_TRUE : XSET_B_UNSET;
         if ( hnd->mode != HANDLER_MODE_FILE )
-        {
-            set->keep_terminal = handler->extract_term ? XSET_B_TRUE : XSET_B_UNSET;
             set->scroll_lock = handler->list_term ? XSET_B_TRUE : XSET_B_UNSET;
-        }
         set->b = XSET_B_TRUE;
         set->icon = NULL;
 
@@ -2071,12 +2350,6 @@ static gboolean validate_archive_handler( HandlerData* hnd )
                                     GTK_ENTRY ( hnd->entry_handler_mime ) );
     const gchar* handler_extension = gtk_entry_get_text(
                                     GTK_ENTRY ( hnd->entry_handler_extension ) );
-    const gboolean handler_compress_term = gtk_toggle_button_get_active(
-                        GTK_TOGGLE_BUTTON ( hnd->chkbtn_handler_compress_term ) );
-    const gboolean handler_extract_term = gtk_toggle_button_get_active(
-                        GTK_TOGGLE_BUTTON ( hnd->chkbtn_handler_extract_term ) );
-    const gboolean handler_list_term = gtk_toggle_button_get_active(
-                        GTK_TOGGLE_BUTTON ( hnd->chkbtn_handler_list_term ) );
 
     /* Validating data. Note that data straight from widgets shouldnt
      * be modified or stored
@@ -2351,18 +2624,26 @@ void on_entry_text_insert( GtkEntryBuffer* buffer, guint position,
         gtk_widget_set_sensitive( hnd->btn_apply,
                                 gtk_widget_get_sensitive( hnd->btn_remove ) );
     }
+    if ( hnd->entry_handler_icon &&
+            gtk_entry_get_buffer( GTK_ENTRY( hnd->entry_handler_icon ) ) ==
+                                                            buffer )
+    {
+        // update icon of icon choose button
+        const char* icon = gtk_entry_get_text(
+                                    GTK_ENTRY( hnd->entry_handler_icon ) );
+        gtk_button_set_image( GTK_BUTTON( hnd->icon_choose_btn ),
+                            xset_get_image(
+                            icon && icon[0] ? icon :
+                            GTK_STOCK_OPEN,
+                            GTK_ICON_SIZE_BUTTON ) );
+    }
 }
-               
+
 void on_entry_text_delete( GtkEntryBuffer* buffer, guint position,
                                  guint n_chars,
                                  HandlerData* hnd )
 {
-    if ( !hnd->changed )
-    {
-        hnd->changed = TRUE;
-        gtk_widget_set_sensitive( hnd->btn_apply,
-                                gtk_widget_get_sensitive( hnd->btn_remove ) );
-    }
+    on_entry_text_insert( buffer, position, NULL, n_chars, hnd );
 }
 
 void on_terminal_toggled( GtkToggleButton* togglebutton, HandlerData* hnd )
@@ -2375,7 +2656,271 @@ void on_terminal_toggled( GtkToggleButton* togglebutton, HandlerData* hnd )
     }
 }
 
-void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
+static void on_icon_choose_button_clicked( GtkWidget* widget, HandlerData* hnd )
+{
+    // get current icon
+    char* new_icon;
+    const char* icon = gtk_entry_get_text( GTK_ENTRY( hnd->entry_handler_icon ) );
+
+    new_icon = xset_icon_chooser_dialog( GTK_WINDOW( hnd->dlg ), icon );
+    
+    if ( new_icon )
+    {
+        gtk_entry_set_text( GTK_ENTRY( hnd->entry_handler_icon ), new_icon );
+        g_free( new_icon );
+    }
+}
+
+void on_option_cb( GtkMenuItem* item, HandlerData* hnd )
+{
+    if ( hnd->changed )
+        on_configure_button_press( GTK_BUTTON( hnd->btn_apply ), hnd );
+
+    int job = GPOINTER_TO_INT( g_object_get_data( G_OBJECT( item ), "job" ) );
+    
+    // Determine handler selected
+    XSet* set_sel = NULL;
+    gchar* xset_name;
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+                                    GTK_TREE_VIEW( hnd->view_handlers ) );
+    GtkTreeIter it;
+    GtkTreeModel* model;
+    if ( gtk_tree_selection_get_selected( selection, &model, &it ) )
+    {
+        gtk_tree_model_get( model, &it,
+                            COL_XSET_NAME, &xset_name,
+                            -1 );
+        set_sel = xset_is( xset_name );
+        g_free( xset_name );
+    }
+
+    // determine job
+    if ( job == HANDLER_JOB_IMPORT_FILE )
+    {}
+    else if ( job == HANDLER_JOB_IMPORT_URL )
+    {}
+    else if ( job == HANDLER_JOB_RESTORE_ALL )
+    {
+        restore_defaults( hnd, TRUE );
+        return;
+    }
+    else if ( job == HANDLER_JOB_REMOVE )
+    {
+        on_configure_button_press( GTK_BUTTON( hnd->btn_remove ), hnd );
+        return;
+    }
+    else if ( job == HANDLER_JOB_EXPORT )
+    {
+        // export
+        if ( !set_sel )
+            return;   // nothing selected - failsafe
+
+        if ( g_str_has_prefix( set_sel->name, handler_def_prefix[hnd->mode] )
+                                        && set_sel->disable )
+        {
+            // is an unsaved default handler, click Defaults then Apply to save
+            restore_defaults( hnd, FALSE );
+            on_configure_button_press( GTK_BUTTON( hnd->btn_apply ), hnd );
+            if ( set_sel->disable )
+                return;   // failsafe
+        }
+        xset_custom_export( hnd->dlg, NULL, set_sel );
+        return;
+    }
+    else
+        return;
+    
+    // Import file or URL - get import spec from user
+    char* folder;
+    char* file;
+    if ( job == HANDLER_JOB_IMPORT_FILE )
+    {
+        // get file path
+        XSet* save = xset_get( "plug_ifile" );
+        if ( save->s )  //&& g_file_test( save->s, G_FILE_TEST_IS_DIR )
+            folder = save->s;
+        else
+        {
+            if ( !( folder = xset_get_s( "go_set_default" ) ) )
+                folder = "/";
+        }
+        file = xset_file_dialog( GTK_WIDGET( hnd->dlg ),
+                                        GTK_FILE_CHOOSER_ACTION_OPEN,
+                                        _("Choose Handler Plugin File"),
+                                        folder, NULL );
+        if ( !file )
+            return;
+        if ( save->s )
+            g_free( save->s );
+        save->s = g_path_get_dirname( file );
+    }
+    else
+    {
+        // Get URL
+        file = NULL;
+        if ( !xset_text_dialog( GTK_WIDGET( hnd->dlg ), _("Enter Handler Plugin URL"), NULL, FALSE, _("Enter SpaceFM Handler Plugin URL:\n\n(wget will be used to download the handler plugin file)"), NULL, NULL, &file, NULL, FALSE, "#handlers-opt-impu" ) || !file || file[0] == '\0' )
+            return;
+    }
+    // Make Plugin Dir
+    const char* user_tmp = xset_get_user_tmp_dir();
+    if ( !user_tmp )
+    {
+        xset_msg_dialog( GTK_WIDGET( hnd->dlg ), GTK_MESSAGE_ERROR,
+                            _("Error Creating Temp Directory"), NULL, 0, 
+                            _("Unable to create temporary directory"), NULL,
+                            NULL );
+        g_free( file );
+        return;
+    }
+    char* hex8;
+    folder = NULL;
+    while ( !folder || ( folder && g_file_test( folder,
+                                                G_FILE_TEST_EXISTS ) ) )
+    {
+        hex8 = randhex8();
+        if ( folder )
+            g_free( folder );
+        folder = g_build_filename( user_tmp, hex8, NULL );
+        g_free( hex8 );
+    }
+    
+    // Install plugin
+    install_plugin_file( NULL, hnd->dlg, file, folder,
+                            job == HANDLER_JOB_IMPORT_FILE ? 0 : 1,
+                            PLUGIN_JOB_COPY, NULL );
+    g_free( file );
+    g_free( folder );
+}
+
+static void on_archive_default( GtkMenuItem *menuitem, XSet* set )
+{
+    const char* arcname[] =
+    {
+        "arc_def_open",
+        "arc_def_ex",
+        "arc_def_exto",
+        "arc_def_list"
+    };
+    int i;
+    for ( i = 0; i < G_N_ELEMENTS( arcname ); i++ )
+    {
+        if ( !strcmp( set->name, arcname[i] ) )
+            set->b = XSET_B_TRUE;
+        else
+            xset_set_b( arcname[i], FALSE );
+    }
+}
+
+static GtkWidget* add_popup_menuitem( GtkWidget* popup,
+                                      GtkAccelGroup* accel_group,
+                                      const char* label, const char* image,
+                                      int job,
+                                      HandlerData* hnd )
+{
+    GtkWidget* item = gtk_image_menu_item_new_with_mnemonic( label );
+    if ( image )
+        gtk_image_menu_item_set_image ( GTK_IMAGE_MENU_ITEM( item ),
+                        xset_get_image( image, GTK_ICON_SIZE_MENU ) );
+    gtk_container_add ( GTK_CONTAINER ( popup ), item );
+    g_signal_connect( G_OBJECT( item ), "activate",
+                  G_CALLBACK( on_option_cb ), ( gpointer ) hnd );
+    g_object_set_data( G_OBJECT( item ), "job", GINT_TO_POINTER( job ) );
+    return item;
+}
+
+static void on_options_button_clicked( GtkWidget* btn, HandlerData* hnd )
+{
+    GtkWidget* item;
+    XSet* set;
+    
+    // Determine if a handler is selected
+    GtkTreeSelection* selection = gtk_tree_view_get_selection(
+                                    GTK_TREE_VIEW( hnd->view_handlers ) );
+    gboolean handler_selected = gtk_tree_selection_get_selected( selection,
+                                                            NULL, NULL );
+
+    // build menu
+    GtkWidget* popup = gtk_menu_new();
+    GtkAccelGroup* accel_group = gtk_accel_group_new();
+
+    if ( !btn )
+    {
+        // menu is shown from right-click on list
+        item = add_popup_menuitem( popup, accel_group, _("_Remove"),
+                            GTK_STOCK_REMOVE, HANDLER_JOB_REMOVE, hnd );
+        gtk_widget_set_sensitive( item, handler_selected );
+    }
+    
+    item = add_popup_menuitem( popup, accel_group, _("_Export"),
+                                GTK_STOCK_SAVE, HANDLER_JOB_EXPORT, hnd );
+    gtk_widget_set_sensitive( item, handler_selected );
+
+    add_popup_menuitem( popup, accel_group, _("Import _File"),
+                            GTK_STOCK_ADD, HANDLER_JOB_IMPORT_FILE, hnd );
+    add_popup_menuitem( popup, accel_group, _("Import _URL"),
+                            GTK_STOCK_NETWORK, HANDLER_JOB_IMPORT_URL, hnd );
+    add_popup_menuitem( popup, accel_group, _("Restore _Default Handlers"),
+                            GTK_STOCK_REVERT_TO_SAVED, HANDLER_JOB_RESTORE_ALL,
+                                                                        hnd );
+    if ( btn )
+    {
+        // menu is shown from Options button
+        if ( hnd->mode == HANDLER_MODE_ARC )
+        {
+            // Archive options
+            xset_context_new();
+            gtk_container_add ( GTK_CONTAINER ( popup ),
+                                            gtk_separator_menu_item_new() );
+            set = xset_get( "arc_def_open" );
+            // do NOT use set = xset_set_cb here or wrong set is passed
+            xset_set_cb( "arc_def_open", on_archive_default, set );
+            xset_set_ob2( set, NULL, NULL );
+            XSet* set_radio = set;
+
+            set = xset_get( "arc_def_ex" );
+            xset_set_cb( "arc_def_ex", on_archive_default, set );
+            xset_set_ob2( set, NULL, set_radio );
+            
+            set = xset_get( "arc_def_exto" );
+            xset_set_cb( "arc_def_exto", on_archive_default, set );
+            xset_set_ob2( set, NULL, set_radio );
+
+            set = xset_get( "arc_def_list" );
+            xset_set_cb( "arc_def_list", on_archive_default, set );
+            xset_set_ob2( set, NULL, set_radio );
+
+            set = xset_get( "arc_def_write" );
+            set->disable = geteuid() == 0 || !xset_get_b( "arc_def_parent" );
+
+            // temp remove unwanted items from Archive Defaults submenu
+            set = xset_get( "arc_default" );
+            char* old_desc = set->desc;
+            set->desc = g_strdup( "arc_def_open arc_def_ex arc_def_exto arc_def_list sep_arc1 arc_def_parent arc_def_write" );
+            xset_add_menuitem( NULL, hnd->browser, popup, accel_group, set );
+            g_free( set->desc );
+            set->desc = old_desc;
+        }
+        else if ( hnd->mode == HANDLER_MODE_FS )
+        {
+            // Device handler options
+            xset_context_new();
+            gtk_container_add ( GTK_CONTAINER ( popup ),
+                                            gtk_separator_menu_item_new() );
+            xset_add_menuitem( hnd->desktop, hnd->browser, popup, accel_group,
+                                        xset_get( "dev_mount_options" ) );
+        }
+    }
+
+    // show menu
+    gtk_widget_show_all( GTK_WIDGET( popup ) );
+    g_signal_connect( popup, "selection-done",
+          G_CALLBACK( gtk_widget_destroy ), NULL );
+    gtk_menu_popup( GTK_MENU( popup ), NULL, NULL,
+                        NULL, NULL, 0, gtk_get_current_event_time() );
+}
+
+void ptk_handler_show_config( int mode, DesktopWindow* desktop,
+                              PtkFileBrowser* file_browser,
                               XSet* def_handler_set )
 {
     HandlerData* hnd = g_slice_new0( HandlerData );
@@ -2384,9 +2929,15 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     /* Create handlers dialog
      * Extra NULL on the NULL-terminated list to placate an irrelevant
      * compilation warning */
-    hnd->parent = file_browser ? gtk_widget_get_toplevel(
-                                GTK_WIDGET( file_browser->main_window ) ) :
-                                NULL;
+    if ( desktop )
+        hnd->parent = gtk_widget_get_toplevel( GTK_WIDGET( desktop ) );
+    else if ( file_browser )
+        hnd->parent = gtk_widget_get_toplevel(
+                                GTK_WIDGET( file_browser->main_window ) );
+    else
+        hnd->parent = NULL;
+    hnd->browser = file_browser;
+    hnd->desktop = desktop;
     hnd->dlg = gtk_dialog_new_with_buttons( _(dialog_titles[mode]),
                     hnd->parent ? GTK_WINDOW( hnd->parent ) : NULL,
                     GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
@@ -2394,6 +2945,7 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     gtk_container_set_border_width( GTK_CONTAINER ( hnd->dlg ), 5 );
     g_signal_connect( G_OBJECT( hnd->dlg ), "key-press-event",
                                     G_CALLBACK( on_textview_keypress ), hnd );
+    g_object_set_data( G_OBJECT( hnd->dlg ), "hnd", hnd );
 
     // Debug code
     //g_message( "Parent window title: %s", gtk_window_get_title( GTK_WINDOW( hnd->parent ) ) );
@@ -2421,12 +2973,17 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     // Adding standard buttons and saving references in the dialog
     // 'Restore defaults' button has custom text but a stock image
     hnd->btn_defaults = gtk_dialog_add_button( GTK_DIALOG( hnd->dlg ),
-                                                _("All De_faults"),
+                                                _("Opt_ions"),
                                                 GTK_RESPONSE_NONE );
-    GtkWidget* btn_defaults_image = xset_get_image( "GTK_STOCK_REVERT_TO_SAVED",
+    GtkWidget* btn_defaults_image = xset_get_image( "GTK_STOCK_PROPERTIES",
                                                 GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON( hnd->btn_defaults ),
                                         GTK_WIDGET ( btn_defaults_image ) );
+    gtk_button_set_focus_on_click( GTK_BUTTON( hnd->btn_defaults ), FALSE );
+    // use clicked event because menu only shown once from dialog run???
+    g_signal_connect( G_OBJECT( hnd->btn_defaults ), "clicked",
+                          G_CALLBACK( on_options_button_clicked ), hnd );
+
     hnd->btn_defaults0 = gtk_dialog_add_button( GTK_DIALOG( hnd->dlg ),
                                                 _("Defa_ults"),
                                                 GTK_RESPONSE_NO );
@@ -2434,6 +2991,8 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
                                                 GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON( hnd->btn_defaults0 ),
                                         GTK_WIDGET ( btn_defaults_image0 ) );
+    gtk_button_set_focus_on_click( GTK_BUTTON( hnd->btn_defaults0 ), FALSE );
+
     hnd->btn_cancel = gtk_dialog_add_button( GTK_DIALOG( hnd->dlg ), GTK_STOCK_CANCEL,
                                                    GTK_RESPONSE_CANCEL );
     hnd->btn_ok = gtk_dialog_add_button( GTK_DIALOG( hnd->dlg ), GTK_STOCK_OK,
@@ -2441,8 +3000,8 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
 
     // Generating left-hand side of dialog
     GtkWidget* lbl_handlers = gtk_label_new( NULL );
-    char* str = g_strdup_printf("<b>%s</b>", _(dialog_titles[mode]) );
-    gtk_label_set_markup( GTK_LABEL( lbl_handlers ), str );
+    char* str = g_strdup_printf("<b>%s</b>", _(dialog_mnemonics[mode]) );
+    gtk_label_set_markup_with_mnemonic( GTK_LABEL( lbl_handlers ), str );
     g_free( str );
     gtk_misc_set_alignment( GTK_MISC( lbl_handlers ), 0, 0 );
 
@@ -2505,6 +3064,10 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
 
     // Set column to take all available space - false by default
     gtk_tree_view_column_set_expand ( col, TRUE );
+
+    // Mnemonically attaching treeview to main label
+    gtk_label_set_mnemonic_widget( GTK_LABEL( lbl_handlers ),
+                                   GTK_WIDGET( hnd->view_handlers ) );
 
     // Treeview widgets
     hnd->btn_remove = gtk_button_new_with_mnemonic( _("_Remove") );
@@ -2613,8 +3176,24 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     hnd->entry_handler_name = gtk_entry_new();
     hnd->entry_handler_mime = gtk_entry_new();
     hnd->entry_handler_extension = gtk_entry_new();
-    hnd->entry_handler_icon = mode == HANDLER_MODE_FILE ? gtk_entry_new() :
-                                                                    NULL;
+    if ( mode == HANDLER_MODE_FILE )
+    {
+        hnd->entry_handler_icon = gtk_entry_new();
+        hnd->icon_choose_btn = gtk_button_new_with_mnemonic( _("C_hoose") );
+        gtk_button_set_image( GTK_BUTTON( hnd->icon_choose_btn ),
+                                      xset_get_image( GTK_STOCK_OPEN,
+                                                      GTK_ICON_SIZE_BUTTON ) );
+        gtk_button_set_focus_on_click( GTK_BUTTON( hnd->icon_choose_btn ),
+                                                                    FALSE );
+#if GTK_CHECK_VERSION (3, 6, 0)
+        // keep this
+        gtk_button_set_always_show_image( GTK_BUTTON( hnd->icon_choose_btn ),
+                                                                    TRUE );
+#endif
+    }
+    else
+        hnd->entry_handler_icon = hnd->icon_choose_btn = NULL;
+
     g_signal_connect(
         G_OBJECT( gtk_entry_get_buffer( GTK_ENTRY( hnd->entry_handler_name ) ) ),
             "inserted-text", G_CALLBACK( on_entry_text_insert ), hnd );
@@ -2641,6 +3220,8 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
         g_signal_connect(
             G_OBJECT( gtk_entry_get_buffer( GTK_ENTRY( hnd->entry_handler_icon ) ) ),
                 "deleted-text", G_CALLBACK( on_entry_text_delete ), hnd );
+        g_signal_connect( G_OBJECT( hnd->icon_choose_btn ), "clicked",
+                            G_CALLBACK( on_icon_choose_button_clicked ), hnd );
     }
 
     /* Creating new textviews in scrolled windows */
@@ -2722,7 +3303,9 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     hnd->chkbtn_handler_compress_term =
                 gtk_check_button_new_with_label( _("Run In Terminal") );
     hnd->chkbtn_handler_extract_term =
-                gtk_check_button_new_with_label( _("Run In Terminal") );
+                gtk_check_button_new_with_label( mode == HANDLER_MODE_FILE ?
+                                                    _("Run As Task") :
+                                                    _("Run In Terminal") );
     hnd->chkbtn_handler_list_term =
                 gtk_check_button_new_with_label( _("Run In Terminal") );
     gtk_button_set_focus_on_click( GTK_BUTTON( hnd->chkbtn_handler_compress_term ),
@@ -2835,11 +3418,16 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     if ( mode == HANDLER_MODE_FILE )
     {
         gtk_table_attach( GTK_TABLE( tbl_settings ),
-                            GTK_WIDGET( lbl_handler_icon ), 0, 1, 3, 4,
-                            GTK_FILL, GTK_FILL, 0, 0 );
+                        GTK_WIDGET( lbl_handler_icon ), 0, 1, 3, 4,
+                        GTK_FILL, GTK_FILL, 0, 0 );
+        GtkWidget* hbox_icon = gtk_hbox_new( FALSE, 4 );
+        gtk_box_pack_start( GTK_BOX( hbox_icon ),
+                        GTK_WIDGET( hnd->entry_handler_icon ), TRUE, TRUE, 0 );
+        gtk_box_pack_start( GTK_BOX( hbox_icon ),
+                        GTK_WIDGET( hnd->icon_choose_btn ), FALSE, TRUE, 0 );
         gtk_table_attach( GTK_TABLE( tbl_settings ),
-                            GTK_WIDGET( hnd->entry_handler_icon ), 1, 4, 3, 4,
-                            GTK_EXPAND | GTK_FILL, GTK_FILL, 0, 0 );
+                        GTK_WIDGET( hbox_icon ), 1, 4, 3, 4,
+                        GTK_EXPAND | GTK_FILL, GTK_FILL, 0, 0 );
     }
 
     // Make sure widgets do not separate too much vertically
@@ -2852,6 +3440,10 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     gtk_box_pack_start( GTK_BOX( hbox_compress_header ),
                         GTK_WIDGET( lbl_handler_compress ), TRUE, TRUE,
                         4 );
+    if ( mode == HANDLER_MODE_FILE )
+        // for file handlers, extract_term is used for Run As Task
+        gtk_box_pack_start( GTK_BOX( hbox_compress_header ),
+                        hnd->chkbtn_handler_extract_term, FALSE, TRUE, 4 );
     gtk_box_pack_start( GTK_BOX( hbox_compress_header ),
                         hnd->chkbtn_handler_compress_term, FALSE, TRUE, 4 );
     gtk_box_pack_end( GTK_BOX( hbox_compress_header ),
@@ -2867,7 +3459,8 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
     gtk_box_pack_start( GTK_BOX( hbox_extract_header ),
                         GTK_WIDGET( lbl_handler_extract ), TRUE, TRUE,
                         4 );
-    gtk_box_pack_start( GTK_BOX( hbox_extract_header ),
+    if ( mode != HANDLER_MODE_FILE )
+        gtk_box_pack_start( GTK_BOX( hbox_extract_header ),
                         hnd->chkbtn_handler_extract_term, FALSE, TRUE, 4 );
     gtk_box_pack_end( GTK_BOX( hbox_extract_header ),
                         GTK_WIDGET( lbl_edit1 ), FALSE,
@@ -2944,8 +3537,7 @@ void ptk_handler_show_config( int mode, PtkFileBrowser* file_browser,
         }
         else if ( response == GTK_RESPONSE_NONE )
         {
-            // Restore defaults requested
-            restore_defaults( hnd, TRUE );
+            // Options menu requested
         }
         else if ( response == GTK_RESPONSE_NO )
         {

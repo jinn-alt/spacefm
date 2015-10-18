@@ -1,10 +1,19 @@
+/*
+ * SpaceFM settings.h
+ * 
+ * Copyright (C) 2015 IgnorantGuru <ignorantguru@gmx.com>
+ * Copyright (C) 2006 Hong Jen Yee (PCMan) <pcman.tw (AT) gmail.com>
+ * 
+ * License: See COPYING file
+ * 
+*/
+
 #ifndef _SETTINGS_H_
 #define _SETTINGS_H_
 
 #include <glib.h>
 #include <gdk/gdk.h>
-#include "ptk-bookmarks.h"
-#include <gtk/gtk.h>  //MOD
+#include <gtk/gtk.h>
 #include "ptk-file-browser.h"
 #include "desktop-window.h"
 
@@ -91,8 +100,6 @@ typedef struct
     //gboolean hide_side_pane_buttons;
     //gboolean hide_folder_content_border;
 
-    /* Bookmarks */
-    PtkBookmarks* bookmarks;
     /* Units */
     gboolean use_si_prefix;
 }
@@ -150,6 +157,29 @@ enum {   // do not renumber - these values are saved in session files
     XSET_MENU_SEP
 };
 
+enum {   // do not reorder - these values are saved in session files
+    // also update builtin_tool_name builtin_tool_icon in settings.c
+    XSET_TOOL_NOT,
+    XSET_TOOL_CUSTOM,
+    XSET_TOOL_DEVICES,
+    XSET_TOOL_BOOKMARKS,
+    XSET_TOOL_TREE,
+    XSET_TOOL_HOME,
+    XSET_TOOL_DEFAULT,
+    XSET_TOOL_UP,
+    XSET_TOOL_BACK,
+    XSET_TOOL_BACK_MENU,
+    XSET_TOOL_FWD,
+    XSET_TOOL_FWD_MENU,
+    XSET_TOOL_REFRESH,
+    XSET_TOOL_NEW_TAB,
+    XSET_TOOL_NEW_TAB_HERE,
+    XSET_TOOL_SHOW_HIDDEN,
+    XSET_TOOL_SHOW_THUMB,
+    XSET_TOOL_LARGE_ICONS,
+    XSET_TOOL_INVALID      // keep this always last
+};
+
 enum {
     XSET_JOB_KEY,
     XSET_JOB_ICON,
@@ -170,19 +200,22 @@ enum {
     XSET_JOB_APP,
     XSET_JOB_COMMAND,
     XSET_JOB_SUBMENU,
+    XSET_JOB_SUBMENU_BOOK,
     XSET_JOB_SEP,
+    XSET_JOB_ADD_TOOL,
     XSET_JOB_IMPORT_FILE,
     XSET_JOB_IMPORT_URL,
+    XSET_JOB_IMPORT_GTK,
     XSET_JOB_CUT,
     XSET_JOB_COPY,
     XSET_JOB_PASTE,
     XSET_JOB_REMOVE,
+    XSET_JOB_REMOVE_BOOK,
     XSET_JOB_NORMAL,
     XSET_JOB_CHECK,
     XSET_JOB_CONFIRM,
     XSET_JOB_DIALOG,
     XSET_JOB_MESSAGE,
-    XSET_JOB_SHOW,
     XSET_JOB_COPYNAME,
     XSET_JOB_PROP,
     XSET_JOB_PROP_CMD,
@@ -194,8 +227,26 @@ enum {
     XSET_JOB_BROWSE_PLUGIN,
     XSET_JOB_HELP,
     XSET_JOB_HELP_NEW,
+    XSET_JOB_HELP_ADD,
     XSET_JOB_HELP_BROWSE,
-    XSET_JOB_HELP_STYLE
+    XSET_JOB_HELP_STYLE,
+    XSET_JOB_HELP_BOOK,
+    XSET_JOB_TOOLTIPS
+};
+
+enum {
+    PLUGIN_JOB_INSTALL,
+    PLUGIN_JOB_COPY,
+    PLUGIN_JOB_REMOVE
+};
+
+enum {
+    PLUGIN_USE_HAND_ARC,
+    PLUGIN_USE_HAND_FS,
+    PLUGIN_USE_HAND_NET,
+    PLUGIN_USE_HAND_FILE,
+    PLUGIN_USE_BOOKMARKS,
+    PLUGIN_USE_NORMAL
 };
 
 typedef struct
@@ -233,7 +284,7 @@ typedef struct
     char* parent;
     char* child;
     char* line;             // or help if lock
-    // x = line/script/app/bookmark
+    // x = XSET_CMD_LINE..XSET_CMD_BOOKMARK
     // y = user
     // z = custom executable
     char task;
@@ -269,6 +320,7 @@ XSet* evt_pnl_show;
 XSet* evt_pnl_focus;
 XSet* evt_pnl_sel;
 XSet* evt_tab_new;
+XSet* evt_tab_chdir;
 XSet* evt_tab_focus;
 XSet* evt_tab_close;
 XSet* evt_device;
@@ -317,6 +369,10 @@ static const char* gsu_commands[] = // order and contents must match prefdlg.ui
     "/bin/su",
     "/usr/bin/sudo"
 };
+
+// These will contain the su and gsu settings from /etc/spacefm/spacefm.conf
+char* settings_terminal_su;
+char* settings_graphical_su;
 
 typedef struct
 {
@@ -377,6 +433,14 @@ void xset_set_key( GtkWidget* parent, XSet* set );
 XSet* xset_set( const char* name, const char* var, const char* value );
 XSet* xset_set_set( XSet* set, const char* var, const char* value );
 void xset_custom_delete( XSet* set, gboolean delete_next );
+void xset_custom_activate( GtkWidget* item, XSet* set );
+XSet* xset_custom_remove( XSet* set );
+char* xset_custom_get_app_name_icon( XSet* set, GdkPixbuf** icon, int icon_size );
+GdkPixbuf* xset_custom_get_bookmark_icon( XSet* set, int icon_size );
+void xset_custom_export( GtkWidget* parent, PtkFileBrowser* file_browser,
+                                                                    XSet* set );
+GtkWidget* xset_design_show_menu( GtkWidget* menu, XSet* set, XSet* book_insert,
+                                  guint button, guint32 time );
 void xset_add_menu( DesktopWindow* desktop, PtkFileBrowser* file_browser,
                     GtkWidget* menu, GtkAccelGroup *accel_group, char* elements );
 GtkWidget* xset_add_menuitem( DesktopWindow* desktop, PtkFileBrowser* file_browser,
@@ -388,7 +452,7 @@ XSet* xset_set_ob1_int( XSet* set, const char* ob1, int ob1_int );
 XSet* xset_set_ob1( XSet* set, const char* ob1, gpointer ob1_data );
 XSet* xset_set_ob2( XSet* set, const char* ob2, gpointer ob2_data );
 XSet* xset_is( const char* name );
-XSet* xset_find_menu( const char* menu_name );
+XSet* xset_find_custom( const char* search );
 
 void xset_menu_cb( GtkWidget* item, XSet* set );
 gboolean xset_menu_keypress( GtkWidget* widget, GdkEventKey* event,
@@ -403,10 +467,9 @@ char* xset_font_dialog( GtkWidget* parent, const char* title,
                                     const char* preview, const char* deffont );
 void xset_edit( GtkWidget* parent, const char* path, gboolean force_root, gboolean no_root );
 void xset_open_url( GtkWidget* parent, const char* url );
-void xset_add_toolbar( GtkWidget* parent, PtkFileBrowser* file_browser,
-            GtkWidget* toolbar, const char* elements );
-GtkWidget* xset_add_toolitem( GtkWidget* parent, PtkFileBrowser* file_browser,
-                        GtkWidget* toolbar, int icon_size, XSet* set );
+void xset_fill_toolbar( GtkWidget* parent, PtkFileBrowser* file_browser,
+                        GtkWidget* toolbar, XSet* set_parent,
+                        gboolean show_tooltips );
 int xset_msg_dialog( GtkWidget* parent, int action, const char* title, GtkWidget* image,
                     int buttons, const char* msg1, const char* msg2, const char* help );
 GtkTextView* multi_input_new( GtkScrolledWindow* scrolled, const char* text,
@@ -416,15 +479,18 @@ char* multi_input_get_text( GtkWidget* input );
 XSet* xset_custom_new();
 gboolean write_root_settings( FILE* file, const char* path );
 GList* xset_get_plugins( gboolean included );
-void install_plugin_file( gpointer main_win, const char* path,
-                    const char* plug_dir, int type, int job, XSet* insert_set );
-XSet* xset_import_plugin( const char* plug_dir );
+void install_plugin_file( gpointer main_win, GtkWidget* handler_dlg,
+                          const char* path, const char* plug_dir, int type,
+                          int job, XSet* insert_set );
+XSet* xset_import_plugin( const char* plug_dir, gboolean* is_bookmarks );
 void clean_plugin_mirrors();
 char* plain_ascii_name( const char* orig_name );
+char* clean_label( const char* menu_label, gboolean kill_special, gboolean convert_amp );
 void xset_show_help( GtkWidget* parent, XSet* set, const char* anchor );
 gboolean xset_opener( DesktopWindow* desktop, PtkFileBrowser* file_browser,
                                                             char job );
-
+const char* xset_get_builtin_toolitem_label( char tool_type );
+char* xset_icon_chooser_dialog( GtkWindow* parent, const char* def_icon );
 
 
 #endif
